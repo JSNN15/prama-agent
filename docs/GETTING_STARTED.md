@@ -117,7 +117,7 @@ team. Running `swarm` again with an existing team name adds workers to that team
 | Close everything | `prama-agent stop --all -y` |
 
 From a phone: mosh plus the compact cockpit, or the Telegram bot (`prama-agent telegram setup`). See
-the README's "On your phone" section.
+[On your phone](GUIDE.md#on-your-phone) in the guide.
 
 ## When something goes wrong
 

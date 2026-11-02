@@ -79,12 +79,14 @@ fleet() {   # fleet <lang>
   screens "$L"
   "$BIN" zones add backend "$WORK/repos/backend" "API" >/dev/null
   "$BIN" zones add web "$WORK/repos/web" "Landing" >/dev/null
+  # tools/demo.sh records the team's start, colors included.
+  local -a rec=(); [ -n "${DEMO_REC:-}" ] && rec=(_tty "$DEMO_REC")
   if [ "$L" = es ]; then
-    "$BIN" swarm backend --team sec --workers agy:2 --no-open --task "Endurecer la autenticación" >/dev/null 2>&1
+    "${rec[@]}" "$BIN" swarm backend --team sec --workers agy:2 --no-open --task "Endurecer la autenticación" >/dev/null 2>&1
     "$BIN" swarm backend --team docs --workers agy:1 --no-open --task "Documentar la API pública" >/dev/null 2>&1
     local t=("Auditar el flujo de login" "Rotar llaves JWT" "Documentar la política de sesiones" "Rate limiting en /login" "Pruebas de carga del login")
   else
-    "$BIN" swarm backend --team sec --workers agy:2 --no-open --task "Harden authentication" >/dev/null 2>&1
+    "${rec[@]}" "$BIN" swarm backend --team sec --workers agy:2 --no-open --task "Harden authentication" >/dev/null 2>&1
     "$BIN" swarm backend --team docs --workers agy:1 --no-open --task "Document the public API" >/dev/null 2>&1
     local t=("Audit the login flow" "Rotate the JWT keys" "Document the session policy" "Rate limiting on /login" "Load tests for login")
   fi
@@ -131,6 +133,11 @@ PY
   sleep 1.5
 }
 
+_tty() {   # _tty <out> <command…>: runs it on a terminal, so the output keeps its colors
+  local out=$1; shift
+  PRAMA_COLS=${PRAMA_COLS:-104} script -qec "$(printf '%q ' "$@")" /dev/null > "$out" 2>&1 || true
+}
+
 shot() {   # shot <name> <title> <cols> <rows> <command> [keys…]
   local name=$1 title=$2 cols=$3 rows=$4 cmd=$5; shift 5
   tmux -L $UI kill-server 2>/dev/null || true
@@ -153,6 +160,9 @@ _render() {   # _render <html> <png> <width> <height>  (rendered under $WORK, th
     --default-background-color=00000000 --window-size="$3,$4" --screenshot="$tmp" "file://$1" >/dev/null 2>&1 || true
   if [ -s "$tmp" ]; then cp "$tmp" "$2"; echo "  $2"; else echo "  FAILED: $2" >&2; fi
 }
+
+# tools/demo.sh sources this file for the same demo fleet.
+[ -n "${SHOTS_LIB:-}" ] && return 0
 
 for L in $LANGS; do
   echo "== $L"

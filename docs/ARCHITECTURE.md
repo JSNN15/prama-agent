@@ -46,7 +46,9 @@ creates private dirs).
 5. **Session names** must match `SESSION_NAME_RE` (`valid_session_name`); build them with
    `session_name_for` / `slugify`.
 6. **Secrets never on argv** (visible in `ps`). Pass via env inside the runner or via stdin/config files.
-7. **Permissions default to `ask`.** YOLO is opt-in (`--yolo` or `PRAMA_SKIP_PERMISSIONS=1`).
+7. **Permissions default to `ask`.** YOLO is opt-in (`--yolo` or `PRAMA_SKIP_PERMISSIONS=1`), and the
+   host can forbid it (`PRAMA_ALLOW_YOLO=0`, checked in `launch_agent`, the direct launch, `fleet edit`
+   and again by the runner on every restart). `IS_SANDBOX=1` is exported only for yolo as root.
 8. Functions that can fail inside `$(...)` must be followed by `|| exit 1` / `|| return 1` — `die`
    only exits the subshell.
 9. **Never type into an agent that is not READY/WORKING** (`bus_can_inject`); BLOCKED agents get a queue.
@@ -57,7 +59,10 @@ creates private dirs).
     prints exactly `{}`, the "no decision" answer). prama never edits a user file it cannot parse, and
     only owns the `prama-agent` key of `~/.gemini/config/hooks.json`.
 11. **Agents managing agents** go through `_fleet_authorize`: not itself, not a coordinator, within
-    `PRAMA_FLEET_SCOPE`; `spawn` is capped by `PRAMA_FLEET_MAX`.
+    `PRAMA_FLEET_SCOPE`; `spawn` is capped by `PRAMA_FLEET_MAX`. The caller is resolved once per command
+    by `prama_resolve_caller`: the session whose pane the process descends from wins over
+    `PRAMA_SESSION` (a mismatch is logged as an `identity` event). Guard rails, not a boundary: agents
+    share the operator's Unix user (docs/HARDENING.md).
 12. **Pane commands are bash.** They are built with `printf %q` (which may emit `$'…'`), so prama's
     tmux server runs commands with bash (`default-shell`) and only plain panes open the user's login
     shell (`default-command`). Never assume the user's shell can parse a generated command line.
@@ -80,6 +85,17 @@ creates private dirs).
 19. **The plan is append-only history plus a snapshot.** `tasks` is rewritten under `flock`, `log`
     only grows, revisions only increase; what an agent claims (status, progress) is shown next to what
     is observed (activity, evidence), never instead of it.
+20. **Checks are observations prama makes itself.** `plan verify` runs the task's `accept` command in the
+    owner's worktree (or the zone's checkout) and records `time:rc:commit` in `checked`; a failure
+    reopens a task marked done. This is the one place a command stored in state is executed: it was
+    written by the coordinator (same user), it is printed first, and an operator at a terminal
+    confirms it (`--yes` skips). A pass on a tree with uncommitted changes is recorded as `<commit>+dirty`
+    and is never *checked*. Hand-written evidence stays a claim and is never promoted to *checked*.
+21. **Permissions never grow from agent to agent.** `_launch_check_caller` refuses a launch with more
+    permissions than the calling agent's (`perm_rank`: plan < ask < yolo) and permission flags in the
+    pass-through arguments; a yolo *default* is lowered instead (`perm_cap_default`). `fleet edit --perm`
+    applies the same ceiling. Provider profiles outside `PRAMA_PROFILES` are refused in
+    `apply_provider_profile`, which every launch and restart goes through.
 
 ## core.sh API
 

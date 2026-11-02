@@ -119,7 +119,7 @@ su equipo. Si repites `swarm` con el nombre de un equipo existente, los agentes 
 | Cerrar todo | `prama-agent stop --all -y` |
 
 Desde el celular: mosh más el cockpit compacto, o el bot de Telegram (`prama-agent telegram setup`).
-Ver la sección «Desde el celular» del README.
+Ver [Desde el celular](GUIDE.es.md#desde-el-celular) en la guía.
 
 ## Cuando algo falla
 

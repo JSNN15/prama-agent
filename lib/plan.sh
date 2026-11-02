@@ -13,7 +13,7 @@
 # without evidence is unverified, two tasks in progress on the same files overlap.
 # Everything is data: never sourced or executed. Writes are serialised with flock.
 
-PLAN_FIELDS=(id status owner deps est progress created started updated 'done' rev title scope accept evidence)
+PLAN_FIELDS=(id status owner deps est progress created started updated 'done' rev title scope accept evidence checked)
 PLAN_STATUSES=(todo doing review blocked 'done' dropped)
 PRAMA_PLAN_STALE_MIN="${PRAMA_PLAN_STALE_MIN:-20}"
 PLAN_SEP=$'\x1f'
@@ -64,7 +64,7 @@ _plan_can_edit() {
 _plan_load() {
   local f line i
   P_id=() P_status=() P_owner=() P_deps=() P_est=() P_progress=() P_created=() P_started=()
-  P_updated=() P_done=() P_rev=() P_title=() P_scope=() P_accept=() P_evidence=()
+  P_updated=() P_done=() P_rev=() P_title=() P_scope=() P_accept=() P_evidence=() P_checked=()
   PL_REV=1
   [ -f "$PL_DIR/rev" ] && { IFS= read -r PL_REV < "$PL_DIR/rev" || true; }
   [[ $PL_REV =~ ^[0-9]+$ ]] || PL_REV=1
@@ -78,6 +78,7 @@ _plan_load() {
     P_id[i]=${v[0]-} P_status[i]=${v[1]-todo} P_owner[i]=${v[2]-} P_deps[i]=${v[3]-} P_est[i]=${v[4]-}
     P_progress[i]=${v[5]-} P_created[i]=${v[6]-} P_started[i]=${v[7]-} P_updated[i]=${v[8]-} P_done[i]=${v[9]-}
     P_rev[i]=${v[10]-} P_title[i]=${v[11]-} P_scope[i]=${v[12]-} P_accept[i]=${v[13]-} P_evidence[i]=${v[14]-}
+    P_checked[i]=${v[15]-}
   done < "$f"
   # IFS read collapses nothing for a non-whitespace separator, but drops trailing empty fields:
   # the defaults above cover them.
@@ -169,9 +170,14 @@ _plan_flags() {
           _plan_scopes_overlap "${P_scope[i]}" "${P_scope[j]}" && PF+=" overlap:${P_id[j]}"
         done
       fi ;;
-    done) [ -n "${P_evidence[i]}" ] || PF+=' unverified' ;;
+    done)
+      # A pass on a tree with uncommitted changes proves nothing about the commit: not "checked".
+      if [[ ${P_checked[i]} == *:0:* && ${P_checked[i]} != *+dirty ]]; then PF+=' checked'
+      elif [ -z "${P_evidence[i]}" ]; then PF+=' unverified'; fi ;;
     todo) _plan_ready "$i" && PF+=' ready' ;;
   esac
+  # checked = "<time>:<exit code>:<commit>" of the last acceptance check prama ran itself.
+  [[ ${P_status[i]} != dropped && -n ${P_checked[i]} && ${P_checked[i]} != *:0:* ]] && PF+=' failed'
   PF=${PF# }
 }
 
@@ -215,7 +221,7 @@ _plan_m_add() {
   i=${#P_id[@]}
   P_id[i]=$id P_status[i]=todo P_owner[i]=$owner P_deps[i]=$deps P_est[i]=$est P_progress[i]=''
   P_created[i]=$PL_NOW P_started[i]='' P_updated[i]=$PL_NOW P_done[i]='' P_rev[i]=$PL_REV
-  P_title[i]=$(_plan_clean "$title" 160) P_scope[i]=$(_plan_clean "$scope" 200) P_accept[i]=$(_plan_clean "$accept" 200) P_evidence[i]=''
+  P_title[i]=$(_plan_clean "$title" 160) P_scope[i]=$(_plan_clean "$scope" 200) P_accept[i]=$(_plan_clean "$accept" 200) P_evidence[i]='' P_checked[i]=''
   _plan_log add "$id" "$title"
   PL_OUT=$id
 }
@@ -278,6 +284,76 @@ _plan_m_set() {
   _plan_log set "$id" "$*"
 }
 
+# _plan_m_verify <id> <exit code> <commit> <last output line> <mark done 0|1>
+_plan_m_verify() {
+  local id=$1 rc=$2 sha=$3 last=$4 mark=$5 i
+  _plan_idx "$id" || die "$(_t 'Unknown task: %s (prama-agent plan)' "$id")"
+  i=$PI
+  _plan_now
+  P_checked[i]="$PL_NOW:$rc:${sha:-?}" P_updated[i]=$PL_NOW
+  if (( rc == 0 )); then
+    P_evidence[i]=$(_plan_clean "✓ ${P_accept[i]} → ${last:-exit 0}${sha:+ @$sha}" 200)
+    if (( mark )) && [ "${P_status[i]}" != 'done' ]; then
+      P_status[i]='done' P_done[i]=$PL_NOW P_progress[i]=100
+      [ -n "${P_started[i]}" ] || P_started[i]=$PL_NOW
+    fi
+    _plan_log verify "$id" "pass${sha:+ @$sha}: $last"
+  else
+    PL_OUT=''
+    # A task someone called done that fails its own check is not done.
+    if [ "${P_status[i]}" = 'done' ]; then P_status[i]=doing P_done[i]=''; PL_OUT=reopened; fi
+    _plan_log verify "$id" "fail rc=$rc${sha:+ @$sha}: $last${PL_OUT:+ (reopened)}"
+  fi
+}
+
+# plan_verify <id> <mark done 0|1> [yes 0|1] — runs the task's acceptance check (its --accept command)
+# where the work is: the owner's worktree in an isolated team, otherwise the zone's checkout. The exit
+# code and commit are recorded: a pass is evidence prama saw itself, a failure reopens a task marked
+# done. The command was written by the coordinator (same user): it is shown first, and the operator
+# confirms it at a terminal.
+plan_verify() {
+  local id=$1 mark=$2 yes=${3:-0} i dir='' sha out rc=0 last owner accept
+  _plan_load
+  _plan_idx "$id" || die "$(_t 'Unknown task: %s (prama-agent plan)' "$id")"
+  i=$PI owner=${P_owner[i]} accept=${P_accept[i]}
+  _plan_can_edit "$owner" || die "$(_t 'Only the coordinator or the task owner can change %s.' "$id")"
+  [ -n "$accept" ] || die "$(_t '%s has no acceptance check: prama-agent plan set %s accept="<command>".' "$id" "$id")"
+  [ -n "$owner" ] && [ -n "$(state_get "$owner" WORKTREE)" ] && dir=$(state_get "$owner" TARGET_DIR)
+  [ -n "$dir" ] && [ -d "$dir" ] || dir=$(zone_dir "$PL_ZONE")
+  [ -d "$dir" ] || die "$(_t 'Directory not found: %s' "$dir")"
+  sha=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || true)
+  # The check runs on the working tree. With uncommitted changes the result is not the commit's,
+  # so it is recorded as <commit>+dirty and never shows as checked by prama.
+  local dirty=0
+  [ -n "$sha" ] && dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -c . || true)
+  (( dirty > 0 )) && sha+='+dirty'
+  info_msg "$(_t 'Checking %s in %s: %s' "$id" "$dir${sha:+ @$sha}" "$accept")"
+  if [ -z "${PRAMA_SESSION:-}" ] && (( ! yes )) && [ -t 0 ]; then
+    local ans
+    printf ' %s ' "$(_t 'Run this command? [y/N]')" >&2
+    IFS= read -r ans || ans=''
+    [[ $ans == [sSyY]* ]] || { info_msg "$(_t 'Cancelled.')"; return 0; }
+  fi
+  out=$( cd "$dir" && timeout "${PRAMA_VERIFY_TIMEOUT:-1800}" bash -c "$accept" 2>&1 ) || rc=$?
+  [ -n "$out" ] && printf '%s\n' "$out" | tail -n 15 | sed 's/^/   /'
+  last=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1)
+  _plan_tx _plan_m_verify "$id" "$rc" "$sha" "${last:0:120}" "$mark" || return 1
+  bus_event verify "${PRAMA_SESSION:-operator}" "${owner:-$PL_COORD}" "$id rc=$rc${sha:+ @$sha}" "$rc"
+  if (( rc == 0 )); then
+    if (( dirty > 0 )); then
+      warn "$(_t '%s: the acceptance check passed, but %s has %d uncommitted file(s): recorded as evidence, not as checked by prama. Commit and verify again.' "$id" "$dir" "$dirty")"
+    else
+      ok "$(_t '%s: the acceptance check passed; recorded as evidence.' "$id")"
+    fi
+    (( mark )) && ok "$(_t '%s done.' "$id")"
+    return 0
+  fi
+  declare -F telegram_notify >/dev/null && telegram_notify "📋 $PL_ZONE · $PL_TEAM
+$(_t '✖ %s: its acceptance check failed (exit %d%s): %s' "$id" "$rc" "${sha:+ @$sha}" "${last:0:120}")" team "$PL_COORD" >/dev/null 2>&1
+  [ "$PL_OUT" = reopened ] && warn "$(_t '%s was marked done: reopened, it is in progress again.' "$id")"
+  die "$(_t '%s: the acceptance check failed (exit %d).' "$id" "$rc")"
+}
+
 _plan_m_replan() {
   local reason=$1
   _plan_can_edit || die "$(_t 'Only the coordinator changes the plan.')"
@@ -294,6 +370,7 @@ Uso: prama-agent plan [<zona>|<sesión>] [--team T]           tablero del plan d
                           [--scope "src/api/**"] [--accept "<cómo se verifica>"]
      prama-agent plan start <id> [--owner <sesión>]        en curso
      prama-agent plan done <id> --evidence "<test y resultado, commit>"
+     prama-agent plan verify <id> [--done]                 corre su --accept donde está el trabajo y lo registra
      prama-agent plan review|block|drop <id> ["<motivo>"]   prama-agent plan set <id> clave=valor…
      prama-agent plan replan "<motivo>"                     nueva revisión del plan (queda en el historial)
      prama-agent plan board | timeline | log | watch | json | html [archivo]
@@ -306,6 +383,7 @@ Usage: prama-agent plan [<zone>|<session>] [--team T]           the team's plan 
                             [--scope "src/api/**"] [--accept "<how it is checked>"]
        prama-agent plan start <id> [--owner <session>]        in progress
        prama-agent plan done <id> --evidence "<test and result, commit>"
+       prama-agent plan verify <id> [--done]                 runs its --accept where the work is and records it
        prama-agent plan review|block|drop <id> ["<reason>"]   prama-agent plan set <id> key=value…
        prama-agent plan replan "<reason>"                     a new revision of the plan (kept in the history)
        prama-agent plan board | timeline | log | watch | json | html [file]
@@ -327,7 +405,7 @@ subcmd_plan() {
   done
   set -- "${rest[@]}"
   case ${1:-} in
-    add|start|done|review|block|drop|set|replan|board|timeline|gantt|log|history|watch|json|html|help|-h|--help|show)
+    add|start|done|verify|check|review|block|drop|set|replan|board|timeline|gantt|log|history|watch|json|html|help|-h|--help|show)
       sub=$1; shift ;;
     '') ;;
     *)
@@ -373,13 +451,21 @@ subcmd_plan() {
       [ -n "$id" ] || die "$(_t 'Usage: prama-agent plan %s <id>' start)"
       _plan_tx _plan_m_status "$id" doing "$owner" || return 1
       ok "$(_t '%s in progress.' "$id")" ;;
+    verify|check)
+      local id='' mark=0 yes=0
+      while (( $# )); do case $1 in --done) mark=1; shift ;; --yes|-y) yes=1; shift ;; *) id=${id:-$1}; shift ;; esac; done
+      [ -n "$id" ] || die "$(_t 'Usage: prama-agent plan verify <id> [--done]')"
+      plan_verify "$id" "$mark" "$yes" ;;
     done)
-      local id=${1:-} ev=''; shift || true
-      while (( $# )); do case $1 in --evidence|-e) ev=${2:-}; shift 2 ;; *) ev+="${ev:+ }$1"; shift ;; esac; done
+      local id=${1:-} ev='' verify=0 yes=0; shift || true
+      while (( $# )); do
+        case $1 in --evidence|-e) ev=${2:-}; shift 2 ;; --verify) verify=1; shift ;; --yes|-y) yes=1; shift ;; *) ev+="${ev:+ }$1"; shift ;; esac
+      done
       [ -n "$id" ] || die "$(_t 'Usage: prama-agent plan %s <id>' 'done')"
+      if (( verify )); then plan_verify "$id" 1 "$yes"; return; fi
       _plan_tx _plan_m_status "$id" 'done' '' "$ev" || return 1
       if [ -n "$ev" ]; then ok "$(_t '%s done.' "$id")"
-      else warn "$(_t '%s marked done WITHOUT evidence: it shows as unverified (add --evidence "<test and result>").' "$id")"; fi ;;
+      else warn "$(_t '%s marked done WITHOUT evidence: it shows as unverified (plan verify %s runs its acceptance check).' "$id" "$id")"; fi ;;
     review|block|drop)
       local id=${1:-}; shift || true
       local st=$sub; [ "$sub" = block ] && st=blocked; [ "$sub" = drop ] && st=dropped
@@ -451,6 +537,8 @@ _plan_card() {
   [[ $PF == *stale* ]] && flags+=" ⚠"
   [[ $PF == *orphan* ]] && flags+=" ✝"
   [[ $PF == *unverified* ]] && flags+=" ?"
+  [[ $PF == *checked* ]] && flags+=" ✓"
+  [[ $PF == *failed* ]] && flags+=" ✖"
   [[ $PF == *overlap* ]] && flags+=" ⇄"
   (( ${P_rev[i]:-0} == PL_REV && PL_REV > 1 )) && flags+=" Δ"
   if [ "$st" = doing ] && [ -n "${P_progress[i]}" ]; then ui_gauge "${P_progress[i]}" 4; g=" $UI_S"; fi
@@ -524,7 +612,7 @@ plan_board() {
       done
     done
   fi
-  printf '\n %s\n' "$C_MUTED$(_t '● ready  ▶ in progress  ◆ review  ■ blocked  ✔ done  ⚠ stale  ? no evidence  ⇄ same files  ✝ owner gone  Δ changed in r%d' "$PL_REV")$C_OFF"
+  printf '\n %s\n' "$C_MUTED$(_t '● ready  ▶ in progress  ◆ review  ■ blocked  ✔ done  ✓ checked by prama  ✖ check failed  ? no evidence  ⚠ stale  ⇄ same files  ✝ owner gone  Δ changed in r%d' "$PL_REV")$C_OFF"
 }
 
 _tui_blank_s() { printf -v UI_S '%*s' "$1" ''; }
@@ -618,7 +706,7 @@ plan_history() {
   local ts rev who act task det n=${1:-40}
   tail -n "$n" "$PL_DIR/log" | while IFS='|' read -r ts rev who act task det; do
     local col=$C_TEXT
-    case $act in replan) col=$C_BRASS ;; done) col=$C_LIVE ;; blocked|dropped) col=$C_ERR ;; doing) col=$C_NEON ;; esac
+    case $act in replan) col=$C_BRASS ;; done) col=$C_LIVE ;; verify) col=$C_PURP ;; blocked|dropped) col=$C_ERR ;; doing) col=$C_NEON ;; esac
     printf ' %s%(%m-%d %H:%M)T%s r%-2s %s%-7s%s %-5s %s %s\n' "$C_MUTED" "$ts" "$C_OFF" "$rev" "$col" "$act" "$C_OFF" "$task" \
       "$C_MUTED$(_plan_short_owner "$who")$C_OFF" "$det"
   done
@@ -717,6 +805,8 @@ HTML
       [ -n "${P_owner[i]}" ] && col=${oc[${P_owner[i]}]:-var(--border)}
       [[ $PF == *stale* ]] && fl+="<span class=flag>⚠ $(_plan_h "$(_t 'stale')")</span>"
       [[ $PF == *unverified* ]] && fl+="<span class=flag>? $(_plan_h "$(_t 'no evidence')")</span>"
+      [[ $PF == *checked* ]] && fl+="<span class=flag style=color:var(--ok)>✓ $(_plan_h "$(_t 'checked by prama')")</span>"
+      [[ $PF == *failed* ]] && fl+="<span class=flag style=color:var(--err)>✖ $(_plan_h "$(_t 'check failed')")</span>"
       [[ $PF == *overlap* ]] && fl+="<span class=flag>⇄ $(_plan_h "$(_t 'same files')")</span>"
       [[ $PF == *ready* ]] && fl+="<span class=flag style=color:var(--ok)>● $(_plan_h "$(_t 'ready')")</span>"
       [ -n "${P_owner[i]}" ] && meta+="$(_plan_h "$(_plan_short_owner "${P_owner[i]}")")"
@@ -811,7 +901,7 @@ plan_alerts() {
     case $flag in
       stale)            k="$id:stale";      _tv msg "[PRAMA] Plan: %s (\"%s\", %s) has shown no activity for over %d min. Check it (prama-agent logs %s) and update the plan." "$id" "${P_title[i]:0:60}" "${P_owner[i]:-—}" "$PRAMA_PLAN_STALE_MIN" "${P_owner[i]:-…}" ;;
       orphan)           k="$id:orphan";     _tv msg "[PRAMA] Plan: %s is in progress but its owner %s is gone. Reassign it (bus assign <session> \"…\" --task %s)." "$id" "${P_owner[i]}" "$id" ;;
-      unverified)       k="$id:unverified"; _tv msg "[PRAMA] Plan: %s is done without evidence. Verify it and record how: prama-agent plan set %s evidence=\"<test and result>\"." "$id" "$id" ;;
+      unverified)       k="$id:unverified"; _tv msg "[PRAMA] Plan: %s is done without evidence. Check it: prama-agent plan verify %s runs its acceptance check (or record how: plan set %s evidence=\"<test and result>\")." "$id" "$id" "$id" ;;
       overlap:*)        k="$id:overlap";    _tv msg "[PRAMA] Plan: %s and another task in progress touch the same files (%s): expect conflicts; sequence them or split the files." "$id" "${P_scope[i]}" ;;
       ready)
         [ -z "${P_owner[i]}" ] || continue

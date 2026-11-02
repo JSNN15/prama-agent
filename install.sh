@@ -46,11 +46,12 @@ VERSION=$(sed -n 's/^VERSION="\(.*\)"/\1/p' "$REPO_DIR/bin/prama-agent")
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 missing=()
-for dep in tmux git; do command -v "$dep" >/dev/null 2>&1 || missing+=("$dep"); done
+# jq is required: the CLI hooks (blocked/idle state), quota, plans and the JSON outputs use it.
+for dep in tmux git jq; do command -v "$dep" >/dev/null 2>&1 || missing+=("$dep"); done
 [ ${#missing[@]} -eq 0 ] || fail "Faltan dependencias / missing: ${missing[*]} (sudo apt install ${missing[*]})"
 optional=()
-for dep in jq fzf less; do command -v "$dep" >/dev/null 2>&1 || optional+=("$dep"); done
-[ ${#optional[@]} -eq 0 ] || note "Recomendado / recommended: sudo apt install ${optional[*]}  (jq: hooks y cuota)"
+for dep in fzf less; do command -v "$dep" >/dev/null 2>&1 || optional+=("$dep"); done
+[ ${#optional[@]} -eq 0 ] || note "Recomendado / recommended: sudo apt install ${optional[*]}"
 
 # ── Install ──────────────────────────────────────────────────────────────────
 chmod +x "$REPO_DIR"/bin/*

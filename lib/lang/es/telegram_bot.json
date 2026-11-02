@@ -202,5 +202,9 @@
   "✝ owner gone": "✝ sin dueño",
   "🟢 ready": "🟢 lista para empezar",
   "⇄ same files": "⇄ mismos archivos",
-  "<i>No plan yet. The coordinator builds it with prama-agent plan add; ask it from 💬 Talk.</i>": "<i>Aún no hay plan. El coordinador lo arma con prama-agent plan add; pídeselo desde 💬 Hablar.</i>"
+  "<i>No plan yet. The coordinator builds it with prama-agent plan add; ask it from 💬 Talk.</i>": "<i>Aún no hay plan. El coordinador lo arma con prama-agent plan add; pídeselo desde 💬 Hablar.</i>",
+  "✅ checked by prama": "✅ verificada por prama",
+  "❌ check failed": "❌ verificación fallida",
+  "(screens are not sent from this host: PRAMA_TG_SCREENS=0)": "(las pantallas no se envían desde este servidor: PRAMA_TG_SCREENS=0)",
+  "📨 Sent to <b>%s</b>.": "📨 Enviado a <b>%s</b>."
 }

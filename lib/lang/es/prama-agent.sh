@@ -152,4 +152,10 @@ I18N+=(
   ["Directory '%s' of zone '%s' does not exist."]='El directorio '\''%s'\'' de la zona '\''%s'\'' no existe.'
   ["Agent '%s' is not installed."]='El agente '\''%s'\'' no está instalado.'
   ['Could not enter %s']='No se pudo entrar a %s'
+  ['This host does not allow yolo (PRAMA_ALLOW_YOLO=0): use --ask or --plan.']='Este servidor no permite yolo (PRAMA_ALLOW_YOLO=0): usa --ask o --plan.'
+  ['allowed']='sí'
+  ['sent']='sí'
+  ['all']='todos'
+  ['Policy: yolo %s · profiles %s · merges %s · Telegram screens %s']='Política: yolo %s · perfiles %s · merge %s · pantallas TG %s'
+  ['Your user is in the '\''%s'\'' group: agents can get root. See docs/HARDENING.md.']='Tu usuario está en el grupo '\''%s'\'': los agentes pueden obtener root. Ver docs/HARDENING.es.md.'
 )

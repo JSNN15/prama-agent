@@ -6,6 +6,15 @@
 AVAILABLE_PROFILES=(default openrouter deepseek glm local)
 AVAILABLE_PERM_MODES=(ask plan yolo)
 
+# The host's policy narrows what the menus offer and what launches: PRAMA_ALLOW_YOLO=0 removes
+# yolo, PRAMA_PROFILES lists the provider profiles allowed (default is always one of them).
+agents_apply_policy() {
+  local p keep=()
+  perm_allowed yolo || AVAILABLE_PERM_MODES=(ask plan)
+  for p in "${AVAILABLE_PROFILES[@]}"; do profile_allowed "$p" && keep+=("$p"); done
+  AVAILABLE_PROFILES=("${keep[@]}")
+}
+
 agent_installed() { command -v "$1" >/dev/null 2>&1; }
 
 # Model ids: aliases (opus), full ids (claude-opus-5-5[1m]) or provider paths
@@ -272,6 +281,7 @@ preset_apply_defaults() {
 # OpenRouter & co. natively (see agent_runtime_env), so it ignores them.
 apply_provider_profile() {
   local profile=${1:-default}
+  profile_allowed "$profile" || die "$(_t "The '%s' profile is not allowed on this host (PRAMA_PROFILES=%s)." "$profile" "${PRAMA_PROFILES:-}")"
   case "$profile" in
     ""|default|native) return 0 ;;
     openrouter|or)
@@ -359,6 +369,37 @@ provision_worktree() {
   printf '%s' "$wt_dir"
 }
 
+# An agent that launches another can give it at most its own permissions, and cannot slip a
+# permission flag to the agent CLI through the pass-through arguments.
+_launch_check_caller() {
+  local perm=$1 c=${PRAMA_SESSION:-} cp a
+  [ -n "$c" ] && [ -f "$(state_file "$c")" ] || return 0
+  cp=$(state_get "$c" PERM ask)
+  if (( $(perm_rank "$perm") > $(perm_rank "$cp") )); then
+    warn "$(_t "An agent cannot launch another with more permissions than its own (%s → %s)." "$cp" "$perm")"
+    return 1
+  fi
+  [ "$cp" = yolo ] && return 0
+  for a in ${PASS[@]+"${PASS[@]}"}; do
+    case $a in
+      *dangerously*|--yolo*|--permission-mode*|--approval-mode*|--allowedTools*|--allowed-tools*|--settings*)
+        warn "$(_t "An agent cannot pass '%s' to the agent it launches." "$a")"; return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# perm_cap_default <mode> → the mode, lowered to the calling agent's own when it is higher. For
+# defaults (PRAMA_SKIP_PERMISSIONS=1) only: an explicit higher mode is refused, not lowered.
+perm_cap_default() {
+  local c=${PRAMA_SESSION:-} cp
+  if [ -n "$c" ] && [ -f "$(state_file "$c")" ]; then
+    cp=$(state_get "$c" PERM ask)
+    (( $(perm_rank "$1") > $(perm_rank "$cp") )) && { printf '%s' "$cp"; return 0; }
+  fi
+  printf '%s' "$1"
+}
+
 # ── Launch pipeline (single implementation used by CLI, TUI, bus and Telegram) ─
 # launch_agent <agent> <zone> <role> <perm> <remote> <profile> <worktree> <mode> [session_name]
 #   mode: attach  → replace this process with the attach (CLI)
@@ -376,7 +417,9 @@ launch_agent() {
   agent_installed "$agent" || { warn "$(_t "Agent '%s' is not installed (not in PATH)." "$agent")"; return 1; }
   is_in "$role" "${AVAILABLE_ROLES[@]}" || { warn "$(_t "Invalid role: '%s'" "$role")"; return 1; }
   [ "$role" = "reader" ] && perm="plan"
+  perm_allowed "$perm" || { warn "$(_t 'This host does not allow yolo (PRAMA_ALLOW_YOLO=0): use --ask or --plan.')"; return 1; }
   is_in "$perm" "${AVAILABLE_PERM_MODES[@]}" || { warn "$(_t "Invalid permission mode: '%s'" "$perm")"; return 1; }
+  _launch_check_caller "$perm" || return 1
   ( apply_provider_profile "$profile" ) || return 1
   if [ -n "$PRESET" ]; then ( preset_load "$PRESET" >/dev/null ) || { warn "$(_t "Unknown preset: '%s'" "$PRESET")"; return 1; }; fi
 
@@ -423,7 +466,9 @@ launch_agent() {
   # Only non-secret env goes on the tmux command line; provider tokens are applied by the
   # runner inside the pane (they would otherwise be visible in `ps`).
   local tmux_env=(-e "PATH=$PATH" -e "PRAMA_DAEMON_TASK=${DAEMON_TASK:-}")
-  [ "$perm" = "yolo" ] && tmux_env+=(-e "IS_SANDBOX=1")
+  # IS_SANDBOX=1 is how Claude Code accepts --dangerously-skip-permissions as root; it is set only
+  # for yolo as root, where it is needed (it tells the CLI it runs in a sandbox, which prama is not).
+  [ "$perm" = "yolo" ] && (( EUID == 0 )) && tmux_env+=(-e "IS_SANDBOX=1")
   [ -n "${XDG_CONFIG_HOME:-}" ] && tmux_env+=(-e "XDG_CONFIG_HOME=$XDG_CONFIG_HOME")
 
   local runner=("$SELF_PATH" --internal-runner "$name" "$target_d" "$profile" "${ONESHOT:-0}" "$role" \

@@ -7,6 +7,11 @@ set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$REPO_DIR/bin/prama-agent"
+# prama requires them (install.sh refuses to install without); without them dozens of checks would
+# fail for the wrong reason.
+for _dep in tmux git jq python3; do
+  command -v "$_dep" >/dev/null 2>&1 || { echo "tests: $_dep is required (sudo apt install $_dep)" >&2; exit 2; }
+done
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -55,8 +60,9 @@ mkdir -p "$TMP_ROOT/interp" "$TMP_ROOT/ctl"
 #   mock_ctl <session> interactive        → the mock reads stdin until SIGTERM
 #   mock_ctl <session> screen "<text>"    → the mock prints <text> after starting
 #   mock_ctl <session> nohup              → the mock ignores SIGHUP
+#   mock_ctl <session> run "<script>"     → the mock runs <script> inside its pane (output: .out)
 mock_ctl() {
-  if [ "$2" = screen ]; then printf '%s\n' "$3" > "$TMP_ROOT/ctl/$1.screen"
+  if [ "$2" = screen ] || [ "$2" = run ]; then printf '%s\n' "$3" > "$TMP_ROOT/ctl/$1.$2"
   else : > "$TMP_ROOT/ctl/$1.$2"; fi
 }
 mock_ctl_clear() { rm -f "$TMP_ROOT/ctl/$1".*; }
@@ -71,6 +77,7 @@ printf 'MOCK_AGENT %s ARGS:' "$(basename "$0")"; printf ' [%s]' "$@"; printf '\n
 echo "ENV role=${PRAMA_ROLE:-none} model=${ANTHROPIC_MODEL:-native} sandbox=${IS_SANDBOX:-0}"
 [ -n "${OPENCODE_CONFIG_CONTENT:-}" ] && echo "OCCFG $OPENCODE_CONFIG_CONTENT key=${OPENROUTER_API_KEY:+set}"
 [ -f "$CTL.screen" ] && cat "$CTL.screen"
+[ -f "$CTL.run" ] && bash "$CTL.run" > "$CTL.out" 2>&1
 [ -f "$CTL.nohup" ] && trap '' HUP   # like agy: survives losing its terminal
 if [ -f "$CTL.interactive" ]; then
   # Behaves like an interactive CLI: echoes every line it receives until SIGTERM.
@@ -364,6 +371,48 @@ out=$(PRAMA_SESSION=tp-co "$BIN" fleet kill tp-ex1 2>&1)
 assert_true "Coordinator kills an extra agent of its zone" "! $P has-session -t =tp-ex1 2>/dev/null"
 "$BIN" stop --all -y >/dev/null 2>&1
 
+section "Guard rails: caller identity, permission ceiling, host policy"
+mock_ctl tp-gc interactive; "$BIN" claude alpha --bg --ask --role coordinator --name tp-gc >/dev/null
+mock_ctl tp-gx interactive; PRAMA_SESSION=tp-gc "$BIN" fleet spawn claude alpha --name tp-gx >/dev/null 2>&1
+out=$(PRAMA_SESSION=tp-gc "$BIN" fleet spawn claude alpha --yolo 2>&1); rc=$?
+assert_true "An ask agent cannot launch a yolo one" "[ $rc -ne 0 ]"
+assert_contains "…and says why" "más permisos que los suyos" "$out"
+out=$(PRAMA_SESSION=tp-gc "$BIN" fleet spawn claude alpha -- --dangerously-skip-permissions 2>&1); rc=$?
+assert_true "…nor slip a bypass flag through the pass-through arguments" "[ $rc -ne 0 ]"
+assert_contains "…naming it" "dangerously" "$out"
+out=$(PRAMA_SESSION=tp-gc "$BIN" fleet edit tp-gx --perm yolo 2>&1); rc=$?
+assert_true "…nor raise another agent to yolo" "[ $rc -ne 0 ]"
+assert_eq "…which keeps its mode" "ask" "$(st tp-gx .perm)"
+mock_ctl tp-gd interactive
+PRAMA_SKIP_PERMISSIONS=1 PRAMA_SESSION=tp-gc "$BIN" fleet spawn claude alpha --name tp-gd >/dev/null 2>&1
+assert_eq "A yolo default is lowered to the caller's own mode" "ask" "$(st tp-gd .perm)"
+"$BIN" fleet kill tp-gd >/dev/null 2>&1
+mock_ctl tp-gp run "sleep 1; env -u PRAMA_SESSION '$BIN' fleet kill tp-gc"
+"$BIN" claude alpha --bg --ask --name tp-gp >/dev/null
+wait_for 10 "[ -s '$TMP_ROOT/ctl/tp-gp.out' ]"
+assert_true "Unsetting PRAMA_SESSION inside a pane does not make an agent the operator" \
+  "grep -q coordinador '$TMP_ROOT/ctl/tp-gp.out' && $P has-session -t =tp-gc"
+assert_true "…and the attempt is in the event log" "grep '\"event\":\"identity\"' '$STATE/bus/events.jsonl' | grep -q 'tp-gp.*<unset>'"
+assert_eq "…only that attempt (agents starting up are not logged)" "1" "$(grep -c '"event":"identity"' "$STATE/bus/events.jsonl")"
+$P new-window -d -t "=tp-gc:" "env HOME='$HOME' XDG_CONFIG_HOME='$XDG_CONFIG_HOME' XDG_STATE_HOME='$XDG_STATE_HOME' PRAMA_TMUX_SOCKET='$PRAMA_TMUX_SOCKET' '$BIN' fleet kill tp-gc > '$TMP_ROOT/ctl/win.out' 2>&1"
+wait_for 10 "! $P has-session -t =tp-gc 2>/dev/null"
+assert_true "A shell the operator opens in an agent's session is still the operator" "! $P has-session -t =tp-gc 2>/dev/null"
+out=$(PRAMA_ALLOW_YOLO=0 "$BIN" claude alpha --yolo --dry-run 2>&1); rc=$?
+assert_true "PRAMA_ALLOW_YOLO=0 refuses --yolo" "[ $rc -ne 0 ]"
+assert_contains "…naming the policy" "PRAMA_ALLOW_YOLO" "$out"
+out=$(PRAMA_ALLOW_YOLO=0 PRAMA_SKIP_PERMISSIONS=1 "$BIN" claude alpha --dry-run 2>&1)
+assert_not_contains "…and overrides a yolo default" "--dangerously-skip-permissions" "$out"
+out=$(PRAMA_ALLOW_YOLO=0 "$BIN" fleet edit tp-gx --perm yolo 2>&1); rc=$?
+assert_true "…also for fleet edit" "[ $rc -ne 0 ]"
+out=$(PRAMA_PROFILES="local" "$BIN" fleet spawn claude alpha --profile openrouter 2>&1); rc=$?
+assert_true "PRAMA_PROFILES refuses a profile it does not list" "[ $rc -ne 0 ]"
+assert_contains "…naming the policy" "PRAMA_PROFILES" "$out"
+"$BIN" claude alpha --bg --yolo --name tp-gy >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-gy:' | grep -q 'sandbox='"
+if (( EUID == 0 )); then want=sandbox=1; else want=sandbox=0; fi
+assert_contains "IS_SANDBOX only for yolo as root" "$want" "$($P capture-pane -p -t '=tp-gy:')"
+"$BIN" stop --all -y >/dev/null 2>&1
+
 section "Watchdog: alerts and queued delivery"
 mock_ctl tp-wco interactive; "$BIN" claude alpha --bg --role coordinator --name tp-wco >/dev/null
 mock_ctl tp-wex interactive; mock_ctl tp-wex screen "Credit balance is too low"; "$BIN" agy alpha --bg --name tp-wex >/dev/null
@@ -535,6 +584,20 @@ assert_eq "…and the base stays clean" "" "$(git -C "$ISO" status --porcelain -
 out=$(PRAMA_SESSION=tp-iso-t-agy "$BIN" worktree sync 2>&1); rc=$?
 assert_true "The executor syncs itself and gets the conflict to resolve" "[ $rc -ne 0 ] && git -C '$WT/prama-t-agy' diff --name-only --diff-filter=U | grep -q app.txt"
 gitc "$WT/prama-t-agy" merge --abort
+git init -q --bare "$TMP_ROOT/origin.git"; git -C "$ISO" remote add origin "$TMP_ROOT/origin.git"
+printf '%s\n' '#!/usr/bin/env bash' \
+  'case "$1 $2" in' \
+  '  "pr view") exit 1 ;;' \
+  "  \"pr create\") printf '%s\\n' \"\$@\" > '$TMP_ROOT/gh.args'; echo https://example.test/pr/7 ;;" \
+  'esac' > "$TMP_ROOT/bin/gh"
+chmod +x "$TMP_ROOT/bin/gh"
+out=$(PRAMA_MERGE_MODE=pr PRAMA_SESSION=tp-iso-t-coord "$BIN" worktree merge tp-iso-t-agy 2>&1); rc=$?
+assert_true "PRAMA_MERGE_MODE=pr opens a pull request" "[ $rc -eq 0 ]"
+assert_contains "…and prints its URL" "example.test/pr/7" "$out"
+assert_true "…after pushing the branch" "git -C '$TMP_ROOT/origin.git' rev-parse -q --verify refs/heads/prama/t/agy >/dev/null"
+assert_true "…against the team's base" "grep -qx main '$TMP_ROOT/gh.args'"
+assert_eq "…and never writes the zone's checkout" "one" "$(cat "$ISO/app.txt")"
+rm -f "$TMP_ROOT/bin/gh"
 out=$(PRAMA_SESSION=tp-iso-t-agy "$BIN" swarm stop tp-iso-t-coord 2>&1); rc=$?
 assert_true "An executor cannot close the team" "[ $rc -ne 0 ]"
 out=$(PRAMA_SESSION=tp-iso-t-coord "$BIN" swarm stop alpha --all 2>&1); rc=$?
@@ -570,7 +633,7 @@ js=$("$BIN" plan pl --team t json)
 assert_true "bus report --task moves it to review with the evidence" "jq -e '.tasks[0].status == \"review\" and (.tasks[0].evidence | test(\"14 tests\"))' >/dev/null <<< '$js'"
 PRAMA_SESSION=$CO "$BIN" plan start T2 --owner tp-pl-t-agy-2 >/dev/null 2>&1
 out=$(PRAMA_SESSION=$CO "$BIN" plan "done" T2 2>&1)
-assert_contains "done without evidence is flagged" "evidence" "$out"
+assert_contains "done without evidence is flagged" "SIN evidencia" "$out"
 assert_true "…as unverified" "$BIN plan pl --team t json | jq -e '.tasks[1].flags | test(\"unverified\")' >/dev/null"
 PRAMA_SESSION=$CO "$BIN" plan replan "scope changed" >/dev/null 2>&1
 assert_eq "replan bumps the revision" "2" "$("$BIN" plan pl --team t json | jq -r .rev)"
@@ -587,10 +650,33 @@ out=$(PRAMA_PLAN_STALE_MIN=0 bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source
 assert_contains "Watchdog: stale tasks" "sin actividad" "$out"
 assert_contains "…same files in progress" "mismos archivos" "$out"
 assert_contains "…done without evidence" "sin evidencia" "$out"
+out=$(PRAMA_PLAN_STALE_MIN=0 bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; source "'"$REPO_DIR"'/lib/swarm.sh"; source "'"$REPO_DIR"'/lib/plan.sh"; source "'"$REPO_DIR"'/lib/health.sh"; prama_init >/dev/null
+  _plan_target tp-pl-t-coord "" && rm -f "$PL_DIR/.alerted"
+  deliver_to_session() { :; }; telegram_notify() { printf "TG[%s|%s] %s\n" "$2" "$3" "$1"; }
+  _watch_plans')
+assert_contains "Plan alerts also reach Telegram, with the team's buttons" "TG[team|tp-pl-t-coord] 📋 pl · t" "$out"
 "$BIN" cockpit pl --team t --no-attach >/dev/null 2>&1
 assert_true "The cockpit shows the plan live" "$P list-panes -a -F '#{pane_title}' | grep -q 'PLAN'"
 "$BIN" swarm stop pl --team t >/dev/null 2>&1
 assert_true "The plan outlives the team" "$BIN plan pl --team t json | jq -e '.tasks | length == 3' >/dev/null"
+"$BIN" plan pl --team t add "Checked" --accept "echo '14 passed'" >/dev/null 2>&1
+out=$("$BIN" plan pl --team t verify T4 --done --yes 2>&1)
+assert_contains "plan verify runs the task's acceptance check" "pasó" "$out"
+assert_eq "…a pass is recorded as evidence prama saw itself" "done checked" \
+  "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T4") | .status + " " + .flags')"
+"$BIN" plan pl --team t add "Broken" --accept "echo '1 failed'; exit 3" >/dev/null 2>&1
+"$BIN" plan pl --team t "done" T5 --evidence "all good, trust me" >/dev/null 2>&1
+rc=0; out=$("$BIN" plan pl --team t verify T5 --yes 2>&1) || rc=$?
+assert_true "…a failing check fails the command" "[ $rc -ne 0 ] && grep -q 'falló' <<< \"\$out\""
+assert_eq "…and a task called done that fails it is reopened" "doing failed" \
+  "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T5") | .status + " " + .flags')"
+assert_true "…both checks are in the history" "$BIN plan pl --team t log | grep -q 'rc=3'"
+echo y > "$PL/uncommitted"
+out=$("$BIN" plan pl --team t verify T4 --yes 2>&1)
+assert_contains "…a pass on uncommitted changes is not the commit's" "sin commit" "$out"
+assert_eq "…so it is evidence, but not checked by prama" "done |true" \
+  "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T4") | .status + " " + .flags + "|" + (.checked | test("[+]dirty$") | tostring)')"
+rm -f "$PL/uncommitted"
 "$BIN" zones remove pl >/dev/null 2>&1
 
 section "Feedback channel (agents report prama bugs)"

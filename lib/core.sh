@@ -151,6 +151,8 @@ discover_zones() {
 prama_init() {
   prama_load_config
   _filter_agents
+  # Host policy: with PRAMA_ALLOW_YOLO=0 nothing launches without confirmations, whatever the default.
+  [ "${PRAMA_ALLOW_YOLO:-1}" = 0 ] && PRAMA_SKIP_PERMISSIONS=0
   load_zones_file
   discover_zones
   ensure_private_dir "$PRAMA_STATE_HOME"
@@ -286,6 +288,63 @@ prama_sessions() {
     if (( ! include_internal )) && is_internal_session "$s"; then continue; fi
     printf '%s\n' "$s"
   done < <(tmx list-sessions -F '#{session_name}' 2>/dev/null)
+}
+
+# ── Caller identity ─────────────────────────────────────────────────────────
+# Agents learn who they are from PRAMA_SESSION, and an environment variable can be unset or
+# changed by the agent itself. When this process descends from a pane of prama's tmux server, that
+# pane's session is the caller, whatever the environment says (`env -u PRAMA_SESSION` no longer
+# turns an agent into the operator). It raises the bar against mistakes and naive bypasses; it is
+# not a security boundary: every agent runs as the same Unix user (see SECURITY.md).
+prama_resolve_caller() {
+  [ -r "/proc/$$/stat" ] || return 0
+  local panes pid s stat i
+  # Only the pane prama started for the agent counts: a shell the operator opens in another window
+  # of that session is still the operator.
+  panes=$(tmx list-panes -a -F '#{pane_pid} #{session_name} #{pane_start_command}' 2>/dev/null) || return 0
+  [ -n "$panes" ] || return 0
+  local -A owner=()
+  local cmd
+  while read -r pid s cmd; do
+    [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$cmd" == *--internal-runner* ]] && ! is_internal_session "$s" && owner[$pid]=$s
+  done <<< "$panes"
+  pid=$$
+  for (( i = 0; i < 64 && pid > 1; i++ )); do
+    if [ -n "${owner[$pid]:-}" ]; then
+      s=${owner[$pid]}
+      if [ "${PRAMA_SESSION:-}" != "$s" ]; then
+        PRAMA_CALLER_MISMATCH=${PRAMA_SESSION:-<unset>}
+        export PRAMA_SESSION=$s
+      fi
+      return 0
+    fi
+    IFS= read -r stat < "/proc/$pid/stat" 2>/dev/null || return 0
+    stat=${stat##*) }        # the command name may hold spaces and parentheses
+    stat=${stat#* }          # drop the state field: "<ppid> <pgrp> …"
+    pid=${stat%% *}
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  done
+  return 0
+}
+
+# Permission modes, least to most powerful. An agent never grants more than it has.
+perm_rank() { case $1 in plan) echo 0 ;; ask) echo 1 ;; yolo) echo 2 ;; *) echo 1 ;; esac; }
+
+# perm_allowed <mode> → 1 if this host's policy allows it (PRAMA_ALLOW_YOLO=0 forbids yolo).
+perm_allowed() { [ "$1" != yolo ] || [ "${PRAMA_ALLOW_YOLO:-1}" != 0 ]; }
+
+# profile_canonical <name> → the profile's canonical name (aliases: or, zai, router, ccr, native).
+profile_canonical() {
+  case ${1:-default} in
+    ''|default|native) echo default ;; or|openrouter) echo openrouter ;; zai|glm) echo glm ;;
+    router|ccr|local) echo local ;; *) echo "$1" ;;
+  esac
+}
+
+# profile_allowed <name> → 0 if PRAMA_PROFILES (when set) lists it. default is always allowed.
+profile_allowed() {
+  local p; p=$(profile_canonical "$1")
+  [ "$p" = default ] || [ -z "${PRAMA_PROFILES:-}" ] || [[ " $PRAMA_PROFILES " == *" $p "* ]]
 }
 
 is_internal_session() {
