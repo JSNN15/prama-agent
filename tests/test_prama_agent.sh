@@ -476,6 +476,29 @@ out=$("$BIN" fleet watchdog tick)
 assert_contains "Watchdog warns when an account passes PRAMA_QUOTA_WARN" "cuota claude 5h al 95%" "$out"
 wait_for 5 "$P capture-pane -p -t '=tp-qc:' -S -80 | grep -q 'Cuota de claude'"
 assert_contains "…the coordinator gets the alert" "Cuota de claude al 95%" "$($P capture-pane -p -t '=tp-qc:' -S -80 | tr -d '\n')"
+# Quota per account: what any session reported is kept for whoever launches next.
+assert_eq "fleet agents: an account's quota outlives its sessions" "95" "$("$BIN" fleet agents --json | jq -r '.[] | select(.agent=="claude" and .profile=="default") | .five_hour_pct')"
+assert_eq "…and an account past PRAMA_QUOTA_WARN is 'low'" "low" "$("$BIN" fleet agents --json | jq -r '.[] | select(.agent=="claude") | .status')"
+printf 'Q_7D=100\nQ_7D_RESET=1999999999\nQ_TS=%s\n' "$(date +%s)" > "$STATE/bus/accounts/agy-default.quota"
+assert_eq "…an account at 100% is 'exhausted'" "exhausted" "$("$BIN" fleet agents --json | jq -r '.[] | select(.agent=="agy") | .status')"
+printf 'Q_7D=40\nQ_7D_RESET=1000\nQ_TS=%s\nBLOCKED_TS=%s\nBLOCKED_DETAIL=Individual quota reached\n' "$(date +%s)" "$(date +%s)" > "$STATE/bus/accounts/agy-default.quota"
+assert_eq "…a recent 429 block marks it 'blocked'" "blocked" "$("$BIN" fleet agents --json | jq -r '.[] | select(.agent=="agy") | .status')"
+assert_eq "…a window past its reset counts from zero" "0" "$("$BIN" fleet agents --json | jq -r '.[] | select(.agent=="agy") | .seven_day_pct')"
+assert_contains "fleet agents (human): reason and cost hint" "Individual quota reached" "$("$BIN" fleet agents)"
+rm -f "$STATE/bus/accounts/agy-default.quota"
+# A message typed while the CLI was starting can stay in its prompt as a paste: the watchdog submits
+# it, once, and only when prama typed it.
+mock_ctl tp-up interactive; mock_ctl tp-up screen "❯ [Pasted text #1 +1 lines]"; "$BIN" claude alpha --bg --name tp-up >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-up:' | grep -q 'Pasted text'"
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_not_contains "Watchdog leaves a paste prama did not type alone" "GOT: " "$($P capture-pane -p -t '=tp-up:' -S -40)"
+bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; prama_init >/dev/null 2>&1; PRAMA_SEND_DELAY=0 tmx_send tp-up "hola"'
+wait_for 5 "$P capture-pane -p -t '=tp-up:' | grep -q 'GOT: hola'"
+out=$("$BIN" fleet watchdog tick 2>&1)
+assert_contains "…and submits one prama typed" "mensaje sin enviar, enviado" "$out"
+assert_eq "…pressing Enter once" "1" "$($P capture-pane -p -t '=tp-up:' -S -40 | grep -c '^GOT: *$')"
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "…and only once" "1" "$($P capture-pane -p -t '=tp-up:' -S -40 | grep -c '^GOT: *$')"
 "$BIN" fleet hooks uninstall >/dev/null
 hj=$(cat "$HOME/.gemini/config/hooks.json")
 assert_true "fleet hooks uninstall removes only prama's entry" "jq -e 'has(\"prama-agent\") | not' >/dev/null <<< '$hj' && jq -e '.mine' >/dev/null <<< '$hj'"
@@ -552,6 +575,13 @@ assert_true "swarm stop --team closes only that team" "! $P has-session -t =tp-a
 assert_true "…and its cockpit" "! $P has-session -t =tp-cockpit-alpha-seguridad 2>/dev/null"
 "$BIN" swarm stop alpha >/dev/null 2>&1
 assert_eq "swarm stop closes the coordinator and its team" "0" "$("$BIN" fleet status --json | jq '[.[] | select(.zone=="alpha")] | length')"
+"$BIN" swarm alpha --team plan --workers auto --task "x" --no-open >/dev/null 2>&1
+pc=$("$BIN" teams --json | jq -r '.[] | select(.team=="plan") | .coordinator')
+assert_eq "swarm --workers auto: a coordinator with no executors yet" "0" "$("$BIN" fleet status --json | jq --arg c "$pc" '[.[] | select(.parent==$c)] | length')"
+assert_contains "…told to choose them by cost and quota" "ELIGE TUS EJECUTORES" "$(cat "$STATE/bus/inbox/$pc"/new/*.task 2>/dev/null)"
+out=$("$BIN" swarm alpha --team plan --workers ask --no-open 2>&1); rc=$?
+assert_true "…auto/ask only create a team" "[ $rc -ne 0 ] && [[ \"\$out\" == *'ya existe'* ]]"
+"$BIN" swarm stop alpha --team plan >/dev/null 2>&1
 assert_true "…and its cockpit" "! $P has-session -t =tp-cockpit-alpha 2>/dev/null"
 "$BIN" bus swarm-start beta claude agy >/dev/null 2>&1
 assert_eq "v5 'bus swarm-start' still works (coordinator + 1 executor)" "2" "$("$BIN" fleet status --json | jq '[.[] | select(.zone=="beta")] | length')"
@@ -735,6 +765,7 @@ assert_not_contains "English errors" "desconocida" "$out"
 out=$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/roles.sh"; PRAMA_LANG=en; i18n_init; build_role_system_prompt coordinator s z')
 assert_contains "English role prompt keeps the machine marker" "[PRAMA-SWARM ROLE: COORDINATOR" "$out"
 assert_contains "…and teaches the team memory" "prama-agent memory add" "$out"
+assert_contains "…and to check accounts and cost before launching" "prama-agent fleet agents" "$out"
 assert_contains "Screen filter knows the English tags" "none" "$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; screen_block_reason "$1" || echo none' _ $'> [PRAMA ALERT] quota exceeded, credit balance is too low\n⏺ ok')"
 LANGCFG="$TMP_ROOT/langcfg"; mkdir -p "$LANGCFG"
 out=$(XDG_CONFIG_HOME="$LANGCFG" PRAMA_LANG='' "$BIN" lang en 2>&1)

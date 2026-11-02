@@ -5,7 +5,7 @@
 
 set -u
 
-VERSION="6.7.0"
+VERSION="6.8.0"
 
 # Status line fast path: agy redraws it several times per second, so the last line is reused
 # for PRAMA_SL_MIN seconds with bash builtins only (no forks, before anything else runs).
@@ -159,7 +159,7 @@ ${C_BOLD}FLEET${C_OFF}  (what the coordinator uses to manage agents)
   fleet status [--json]  State, blockers (login/quota/credit/model) and model of each agent
   fleet spawn <agent> <zone> [--model M] [--preset P] [--task "…"]   Launch an extra agent
   fleet model <session> <model>   fleet edit <session> …   fleet restart|kill <session>
-  fleet presets | models [agent] | watchdog [status|start|stop|logs] | hooks [status|install|uninstall]
+  fleet agents | presets | models [agent] | watchdog [status|start|stop|logs] | hooks [status|install|uninstall]
 
 ${C_BOLD}TEAMS${C_OFF}
   swarm <zone> --team <name> [--workers agy:3] [--task "goal"]   Coordinator + N agents
@@ -220,7 +220,7 @@ ${C_BOLD}FLOTA${C_OFF}  (lo que usa el coordinador para administrar agentes)
   fleet status [--json]  Estado, bloqueos (login/cuota/crédito/modelo) y modelo de cada agente
   fleet spawn <agente> <zona> [--model M] [--preset P] [--task "…"]   Lanzar un agente extra
   fleet model <sesión> <modelo>   fleet edit <sesión> …   fleet restart|kill <sesión>
-  fleet presets | models [agente] | watchdog [status|start|stop|logs] | hooks [status|install|uninstall]
+  fleet agents | presets | models [agente] | watchdog [status|start|stop|logs] | hooks [status|install|uninstall]
 
 ${C_BOLD}EQUIPOS${C_OFF}
   swarm <zona> --team <nombre> [--workers agy:3] [--task "objetivo"]   Coordinador + N agentes

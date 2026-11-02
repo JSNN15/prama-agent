@@ -178,7 +178,11 @@ EOF
 )
   models_help="Models: claude → opus | sonnet | haiku (or a full id); agy → ids from 'prama-agent fleet models agy'
 (e.g. gemini-3.8-flash-high). Use fast/cheap models for mechanical tasks (tests, scoped refactors,
-documentation) and the most capable ones for design and delicate changes."
+documentation) and the most capable ones for design and delicate changes.
+Before launching anyone, run 'prama-agent fleet agents': it shows which accounts are installed, how
+much quota each has left and when it resets. Pick the cheapest agent and model that can do each task
+well; never launch on an account marked exhausted or blocked. When the choice costs a lot (several
+agents, opus-class models, an account near its limit) or nothing fits, ask the operator first."
   if is_in opencode "${AGENTS[@]}"; then
     models_help+="
 opencode (experimental) → openrouter/<provider>/<model> (e.g. openrouter/qwen/qwen3-coder:free);
@@ -203,6 +207,7 @@ $bus_help
 
 Fleet management (you manage your agents; everything returns JSON with --json):
 - Full status (state, block and reason, model, preset, queue, quota % and reset): prama-agent fleet status --json
+- Agents you can launch, each account's quota and a cost hint:     prama-agent fleet agents
 - Available agents and presets (profiles with skills):              prama-agent fleet presets
 - Launch an extra agent:  prama-agent fleet spawn <$agents_list> $zone [--role executor|reader] [--model M] [--preset P] [--name N] [--worktree branch] [--task "initial instruction"]
 - Add several executors to your team at once: prama-agent swarm $zone --workers agy:3 [--worker-model M] --no-open
@@ -269,7 +274,11 @@ EOF
 )
   models_help="Modelos: claude → opus | sonnet | haiku (o un id completo); agy → ids de 'prama-agent fleet models agy'
 (p. ej. gemini-3.8-flash-high). Usa modelos rápidos/baratos para tareas mecánicas (tests, refactors
-acotados, documentación) y los más capaces para diseño y cambios delicados."
+acotados, documentación) y los más capaces para diseño y cambios delicados.
+Antes de lanzar a alguien, corre 'prama-agent fleet agents': muestra qué cuentas están instaladas, cuánta
+cuota le queda a cada una y cuándo se reinicia. Elige el agente y modelo más barato que haga bien cada
+tarea; nunca lances en una cuenta marcada como agotada o bloqueada. Cuando la elección cuesta mucho
+(varios agentes, modelos tipo opus, una cuenta cerca del límite) o nada sirve, pregúntale antes al operador."
   if is_in opencode "${AGENTS[@]}"; then
     models_help+="
 opencode (experimental) → openrouter/<proveedor>/<modelo> (p. ej. openrouter/qwen/qwen3-coder:free);
@@ -294,6 +303,7 @@ $bus_help
 
 Gestión de la flota (tú administras a tus agentes; todo devuelve JSON con --json):
 - Estado completo (estado, bloqueo y motivo, modelo, preset, cola, cuota % y reinicio): prama-agent fleet status --json
+- Agentes que puedes lanzar, cuota de cada cuenta y costo:          prama-agent fleet agents
 - Agentes disponibles y presets (perfiles con skills):              prama-agent fleet presets
 - Lanzar un agente extra:  prama-agent fleet spawn <$agents_list> $zone [--role executor|reader] [--model M] [--preset P] [--name N] [--worktree rama] [--task "instrucción inicial"]
 - Sumar varios ejecutores a tu equipo de una vez: prama-agent swarm $zone --workers agy:3 [--worker-model M] --no-open

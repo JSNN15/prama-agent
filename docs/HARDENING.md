@@ -49,7 +49,7 @@ Real isolation comes from the operating system: a dedicated user, a container or
 7. **Do not share dependency folders between worktrees** on this host: leave `PRAMA_WORKTREE_LINK`
    unset. One agent's `pip install` or `npm install` would change every other agent's environment. Keep
    an eye on disk space: each executor of an isolated team has its own worktree.
-8. **Pin a version**: `prama-agent update v6.7.0` checks out that tag; `update` with no version follows
+8. **Pin a version**: `prama-agent update v6.8.0` checks out that tag; `update` with no version follows
    the branch you are on.
 9. **Ask first.** If your organization has a policy for AI coding tools or for the providers they talk
    to, a tool that launches many agents needs that approval too.

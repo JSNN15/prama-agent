@@ -52,7 +52,7 @@ El aislamiento real lo da el sistema operativo: un usuario dedicado, un contened
 7. **No compartas carpetas de dependencias entre worktrees** en este servidor: deja `PRAMA_WORKTREE_LINK`
    sin definir. Un `pip install` o `npm install` de un agente cambiaría el entorno de todos los demás.
    Vigila el disco: cada ejecutor de un equipo aislado tiene su propio worktree.
-8. **Fija una versión**: `prama-agent update v6.7.0` deja el repo en esa etiqueta; `update` sin versión
+8. **Fija una versión**: `prama-agent update v6.8.0` deja el repo en esa etiqueta; `update` sin versión
    sigue la rama en la que estás.
 9. **Pide autorización primero.** Si tu organización tiene una política para herramientas de IA o para
    los proveedores con los que hablan, una herramienta que lanza muchos agentes también la necesita.

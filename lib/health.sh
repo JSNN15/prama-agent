@@ -191,7 +191,16 @@ statusline_ingest() {
   valid_session_name "$s" || return 0
   if command -v jq >/dev/null 2>&1; then
     mapfile -t kv < <(jq -r "$_SL_JQ" <<< "$json" 2>/dev/null)
-    (( ${#kv[@]} )) && _kv_merge "$(quota_file "$s")" "$s" "${kv[@]}" "Q_TS=$now"
+    if (( ${#kv[@]} )); then
+      _kv_merge "$(quota_file "$s")" "$s" "${kv[@]}" "Q_TS=$now"
+      local a=() x
+      for x in "${kv[@]}"; do [[ "$x" =~ ^Q_(5H|7D)=[0-9] ]] && a+=("$x"); done
+      if (( ${#a[@]} )); then
+        a=(); for x in "${kv[@]}"; do [[ "$x" == Q_* ]] && a+=("$x"); done
+        mkdir -p "$PRAMA_BUS_DIR/accounts"
+        _kv_merge "$(account_quota_file "$agent" "$(state_get "$s" PROFILE default)")" "$s" "${a[@]}" "Q_TS=$now"
+      fi
+    fi
   fi
   local user_cmd="$PRAMA_STATE_HOME/hooks/user-statusline.cmd"
   if [ "$agent" = claude ] && [ -s "$user_cmd" ]; then
@@ -333,6 +342,12 @@ watchdog_tick() {
         BLOCKED)
           _tv msg '▲ %s blocked (%s): %s' "$s" "$reason" "$detail"; _watch_log "$msg"
           bus_event blocked watchdog "$s" "$reason: $detail"
+          # A quota block belongs to the account: 'fleet agents' shows it to whoever launches next.
+          if [ "$reason" = limit ]; then
+            mkdir -p "$PRAMA_BUS_DIR/accounts"
+            _kv_merge "$(account_quota_file "$(state_get "$s" AGENT)" "$(state_get "$s" PROFILE default)")" "$s" \
+              "BLOCKED_TS=${EPOCHSECONDS:-$(date +%s)}" "BLOCKED_DETAIL=${detail//=/ }"
+          fi
           _tv msg "[PRAMA ALERT] '%s' is BLOCKED (%s): %s. Its tasks stay queued. Options: 'prama-agent fleet restart %s', 'prama-agent fleet model %s <model>', reassign with 'prama-agent bus assign', or tell the operator if it needs a manual login." \
             "$s" "$reason" "${detail:0:160}" "$s" "$s"
           _watch_alert "$s" "$msg" ;;
@@ -359,6 +374,15 @@ watchdog_tick() {
     # Queued work for interactive agents: deliver one task once the agent has been READY for
     # two consecutive ticks (avoids typing into a CLI that is still starting up).
     if [ "$st" = READY ] && [ "$(session_role "$s")" != daemon ]; then
+      # A message prama pasted while the CLI was busy can stay in the prompt unsent: press Enter
+      # for it, once, and only shortly after prama typed it (a paste of the operator's is theirs).
+      local sent; sent=$(state_get "$s" SENT_TS)
+      if [[ "$sent" =~ ^[0-9]+$ ]] && (( ${EPOCHSECONDS:-$(date +%s)} - sent < 120 )) && tmx_unsent_paste "$s"; then
+        state_set "$s" SENT_TS=
+        tmx send-keys -t "=$s:" Enter 2>/dev/null
+        _tv msg '→ %s: unsent message submitted' "$s"; _watch_log "$msg"
+        W_READY[$s]=-1
+      fi
       W_READY[$s]=$(( ${W_READY[$s]:-0} + 1 ))
       if (( W_READY[$s] >= 2 )) && (( $(queue_len "$s") > 0 )); then
         local task

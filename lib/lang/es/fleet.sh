@@ -71,4 +71,12 @@ I18N+=(
   ['Usage: prama-agent fleet hooks [status|install|uninstall]']='Uso: prama-agent fleet hooks [status|install|uninstall]'
   ["Unknown fleet subcommand: '%s' (prama-agent fleet help)"]='Subcomando de fleet desconocido: '\''%s'\'' (prama-agent fleet help)'
   ['An agent cannot raise another'\''s permissions above its own (%s).']='Un agente no puede subirle los permisos a otro por sobre los suyos (%s).'
+  ['Agents you can launch (the quota is per account and shared by all its agents):']='Agentes que puedes lanzar (la cuota es por cuenta y la comparten todos sus agentes):'
+  ['haiku: cheapest (reading, search, mechanical edits) · sonnet: most code · opus: design and delicate changes']='haiku: el más barato (lectura, búsqueda, cambios mecánicos) · sonnet: la mayoría del código · opus: diseño y cambios delicados'
+  ['Gemini models: '\''prama-agent fleet models agy'\''']='Modelos Gemini: '\''prama-agent fleet models agy'\'''
+  ['OpenRouter models: '\''prama-agent fleet models opencode'\'' (:free ones cost nothing but may keep your prompts)']='Modelos de OpenRouter: '\''prama-agent fleet models opencode'\'' (los :free no cuestan nada, pero pueden guardar tus prompts)'
+  ['exhausted (%s), resets %s']='agotada (%s), se reinicia %s'
+  ['blocked by its quota %s ago: %s']='bloqueada por su cuota hace %s: %s'
+  ['near the limit (%s)']='cerca del límite (%s)'
+  ['quota not known yet']='cuota aún desconocida'
 )

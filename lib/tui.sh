@@ -1746,10 +1746,26 @@ tui_new_team() {
          if (( rc )); then step=15; continue; fi
          if (( CHOICE == 0 )); then iso=--isolate; else iso=--shared; fi
          step=2 ;;
-      2) _tv tx 'Agent for the workers'
-         rc=0; tui_list_run "$tx" AG_LABELS AG_METAS AG_AVAIL AG_TARGETS -1 || rc=$?
+      2) # A new team can leave the executors to its coordinator (by cost and quota) or have it
+         # propose them first; an existing team gets agents of the kind chosen here.
+         local -a WL=() WM=() WA=() WT=(); local npick=0
+         if ! find_team "$zone" "$team" >/dev/null 2>&1; then
+           _tv tx '🧭 The coordinator chooses'; WL+=("$tx")
+           _tv tx 'agents and models per task, by cost and quota left'; WM+=("$tx")
+           _tv tx '❓ The coordinator proposes, you approve'; WL+=("$tx")
+           _tv tx 'it tells you which agents and models it wants before launching any'; WM+=("$tx")
+           WA+=(1 1) WT+=('' ''); npick=2
+         fi
+         WL+=("${AG_LABELS[@]}") WM+=("${AG_METAS[@]}") WA+=("${AG_AVAIL[@]}") WT+=("${AG_TARGETS[@]}")
+         _tv tx 'Agent for the workers'
+         rc=0; tui_list_run "$tx" WL WM WA WT -1 || rc=$?
          if (( rc )); then step=15; continue; fi
-         wa=${AGENTS[CHOICE]}; step=3 ;;
+         if (( CHOICE < npick )); then
+           if (( CHOICE == 0 )); then wa=auto; else wa=ask; fi
+           step=4
+         else
+           wa=${AGENTS[CHOICE - npick]}; step=3
+         fi ;;
       3) _tv tx 'How many %s workers?' "$wa"
          rc=0; tui_list_run "$tx" NL NM NA NT 1 || rc=$?
          if (( rc )); then step=2; continue; fi
@@ -1758,7 +1774,7 @@ tui_new_team() {
          _tv tx 'Objective for the coordinator (optional)'
          tui_prompt "$tx" task || task=''
          TUI_LIST_CRUMBS=''; tui_invalidate
-         if ! _tui_run_fullscreen 1 subcmd_swarm "$zone" --team "$team" --coord "$coord" --workers "$wa:$n" ${iso:+"$iso"} ${task:+--task "$task"}; then
+         if ! _tui_run_fullscreen 1 subcmd_swarm "$zone" --team "$team" --coord "$coord" --workers "$( [[ "$wa" =~ ^(auto|ask)$ ]] && printf '%s' "$wa" || printf '%s:%s' "$wa" "$n")" ${iso:+"$iso"} ${task:+--task "$task"}; then
            local t1 t2; _tv t1 'Could not create the team'; _tv t2 'check prama-agent doctor'
            tui_alert "$t1" "${TUI_LAST_ERR:-$t2}"
          fi

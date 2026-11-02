@@ -20,4 +20,5 @@ I18N+=(
   ["[PRAMA ALERT] %s quota at %s%% (%s window, resets %s). It affects every %s agent on this account: move heavy tasks to other agents/models (e.g. 'prama-agent fleet spawn agy <zone>' or 'prama-agent fleet model <session> <model>') before they get blocked."]='[ALERTA PRAMA] Cuota de %s al %s%% (ventana %s, se renueva %s). Afecta a todos los agentes %s de esta cuenta: reparte las tareas pesadas a otros agentes/modelos (p. ej. '\''prama-agent fleet spawn agy <zona>'\'' o '\''prama-agent fleet model <sesión> <modelo>'\'') antes de que se bloqueen.'
   ['Fleet watchdog running (every %ss). Ctrl+C to stop it.']='Watchdog de la flota activo (cada %ss). Ctrl+C para detenerlo.'
   ['No agents left; watchdog finished.']='Sin agentes; watchdog finalizado.'
+  ['→ %s: unsent message submitted']='→ %s: mensaje sin enviar, enviado'
 )
