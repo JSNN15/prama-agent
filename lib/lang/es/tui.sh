@@ -322,4 +322,8 @@ I18N+=(
   ['How will the team work on the code?']='¿Cómo trabajará el equipo sobre el código?'
   ['⇄ Branches']='⇄ Ramas'
   ["each executor's branch: commits to merge, uncommitted, behind"]='la rama de cada ejecutor: commits por integrar, sin commit, atraso'
+  ['🧭 The coordinator chooses']='🧭 El coordinador elige'
+  ['agents and models per task, by cost and quota left']='agentes y modelos por tarea, según costo y cuota que queda'
+  ['❓ The coordinator proposes, you approve']='❓ El coordinador propone, tú apruebas'
+  ['it tells you which agents and models it wants before launching any']='te dice qué agentes y modelos quiere antes de lanzar alguno'
 )

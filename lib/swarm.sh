@@ -58,7 +58,9 @@ Usage: prama-agent swarm <zone> [--team <name>] [options]   coordinator + execut
                                  executors join it; if not, it is created with its own coordinator.
                                  Without --team: the "$PRAMA_DEFAULT_TEAM" team (or asks to choose if the zone already has teams)
        --coord <agent>           coordinator agent (default: claude)
-       --workers <spec>          executors, e.g. agy:3  or  agy:2,claude:1  (def. ${PRAMA_SWARM_WORKERS:-agy:2})
+       --workers <spec>          executors, e.g. agy:3  or  agy:2,claude:1  (def. ${PRAMA_SWARM_WORKERS:-agy:2});
+                                 auto: the coordinator chooses agents and models by cost and quota;
+                                 ask: it proposes them to you first
        --model <m>               coordinator model
        --worker-model <m>        executors' model
        --task "<objective>"      initial objective for the coordinator
@@ -80,7 +82,9 @@ Uso: prama-agent swarm <zona> [--team <nombre>] [opciones]   coordinador + agent
                                  ejecutores se suman a él; si no, se crea con su propio coordinador.
                                  Sin --team: el equipo "$PRAMA_DEFAULT_TEAM" (o pide elegir si la zona ya tiene equipos)
        --coord <agente>          agente coordinador (por defecto: claude)
-       --workers <spec>          ejecutores, p. ej. agy:3  o  agy:2,claude:1  (def. ${PRAMA_SWARM_WORKERS:-agy:2})
+       --workers <spec>          ejecutores, p. ej. agy:3  o  agy:2,claude:1  (def. ${PRAMA_SWARM_WORKERS:-agy:2});
+                                 auto: el coordinador elige agentes y modelos según costo y cuota;
+                                 ask: primero te los propone
        --model <m>               modelo del coordinador
        --worker-model <m>        modelo de los ejecutores
        --task "<objetivo>"       objetivo inicial para el coordinador
@@ -158,7 +162,13 @@ _swarm_start() {
   done
   [ -n "$zone" ] || { _swarm_usage >&2; die "$(_t 'Missing the zone.')"; }
   is_in "$coord_a" "${AGENTS[@]}" && agent_installed "$coord_a" || die "$(_t "Coordinator not available: '%s'" "$coord_a")"
-  _swarm_spec_parse "$spec"
+  # --workers auto|ask: no executors yet; the coordinator picks agents and models by task, cost and
+  # quota (auto) or proposes them to the operator first (ask).
+  local pick=''
+  case "$spec" in
+    auto|ask) pick=$spec; SW_AGENTS=() ;;
+    *)        _swarm_spec_parse "$spec" ;;
+  esac
 
   local live cs='' need=${#SW_AGENTS[@]}
   live=$(prama_sessions | grep -c . || true)
@@ -182,6 +192,7 @@ _swarm_start() {
     fi
     team=$PRAMA_DEFAULT_TEAM
   fi
+  [ -z "$pick" ] || [ -z "$cs" ] || die "$(_t '--workers %s creates a new team; team "%s" already exists (use --workers agent:count).' "$pick" "$team")"
   [ -n "$cs" ] || need=$(( need + 1 ))
   (( live + need <= ${PRAMA_FLEET_MAX:-8} )) \
     || die "$(_t 'The team needs %s sessions and %s of %s are in use (PRAMA_FLEET_MAX).' "$need" "$live" "${PRAMA_FLEET_MAX:-8}")"
@@ -248,6 +259,10 @@ _swarm_start() {
   [ -n "$who" ] || _tv who '(no executors)'
   _tv brief "[PRAMA] Your team \"%s\" in '%s': %s. Delegate with 'prama-agent bus assign <session> \"<task>\"', check with 'prama-agent fleet status' and add or remove agents with 'prama-agent fleet spawn|kill'." "$team" "$zone" "$who"
   [ -n "$task" ] && brief+=" $(_t 'OBJECTIVE: %s' "$task")"
+  case "$pick" in
+    auto) brief+=" $(_t "CHOOSE YOUR EXECUTORS: the operator left the agents and models to you. Plan first, run 'prama-agent fleet agents' (installed accounts, quota left, cost) and launch only what the plan needs, the cheapest agent and model that does each task well: 'prama-agent swarm %s --workers <agent>:<n> --worker-model <model> --no-open' (one call per model). Never use an exhausted or blocked account; if nothing fits, ask the operator." "$zone")" ;;
+    ask)  brief+=" $(_t "PROPOSE YOUR TEAM FIRST: plan, run 'prama-agent fleet agents' (installed accounts, quota left, cost) and tell the operator which executors you would launch (agent, model, how many, why, which quota they use). Launch none until the operator agrees; then: 'prama-agent swarm %s --workers <agent>:<n> --worker-model <model> --no-open'." "$zone")" ;;
+  esac
   if (( ${#branches[@]} )); then
     brief+=" $(_t "ISOLATED TEAM: each executor works on its own branch (%s), you stay on %s in the zone folder. See them with 'prama-agent worktree status', review with 'git diff %s...<branch>', integrate with 'prama-agent worktree merge <session>'." "$(IFS=';'; printf '%s' "${branches[*]}")" "$tbase" "$tbase")"
   fi

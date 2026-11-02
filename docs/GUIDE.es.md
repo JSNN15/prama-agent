@@ -48,6 +48,8 @@ celular), se refresca cada 2 s y admite toques y rueda del ratón.
 prama-agent swarm backend --team arquitectura --workers agy:2 --task "Separar el módulo de facturación"
 prama-agent swarm backend --team seguridad --workers agy:1,claude:1 --worker-model gemini-3.8-flash-high
 prama-agent swarm backend --team docs --workers agy:1 --task "Documentar la API pública"
+prama-agent swarm backend --team pagos --workers auto --task "…"   # el coordinador elige agentes y modelos
+prama-agent swarm backend --team pagos --workers ask --task "…"    # …o te los propone antes de lanzarlos
 prama-agent teams                                 # todos los equipos: zona, nombre, coordinador, agentes, objetivo
 prama-agent cockpit backend --team seguridad      # vista dividida en vivo de un equipo
 prama-agent swarm stop backend --team docs        # cierra un equipo (coordinador y sus agentes)
@@ -59,6 +61,13 @@ objetivo y cockpit, y no se mezclan: los reportes y alertas de un agente van a s
 gestionar, ampliar ni cerrar otro equipo. `swarm` con el nombre de un equipo existente le suma
 agentes; sin `--team` crea el equipo `principal` de la zona, o pide un nombre si la zona ya tiene
 equipos.
+
+**Quién elige a los ejecutores.** Con `--workers auto` (o «🧭 El coordinador elige» en el menú) el
+equipo parte solo con su coordinador: planifica, mira `prama-agent fleet agents` (las cuentas instaladas,
+cuánta cuota le queda a cada una, cuándo se reinicia y si está bloqueada) y lanza el agente y modelo más
+barato que sirva para cada tarea. Con `--workers ask` te propone el equipo y espera tu visto bueno. La
+cuota es por cuenta y prama la recuerda aunque se cierren las sesiones, así que un coordinador no lanza
+agentes en una cuenta agotada.
 
 El coordinador recibe la lista de su equipo y el objetivo apenas está listo, delega por el bus y puede
 hacer crecer su equipo (`swarm <su zona> --workers agy:2`), cambiar modelos o cerrar agentes.
@@ -248,7 +257,7 @@ prama-agent fleet status --json              # estado, motivo de bloqueo, modelo
 prama-agent fleet spawn agy backend --preset cheap --task "Agrega tests a utils/date.ts"
 prama-agent fleet model prama-claude-backend-2 sonnet      # mismo panel, misma conversación
 prama-agent fleet edit  prama-claude-backend-2 --effort high --preset reviewer
-prama-agent fleet restart <sesión> · fleet kill <sesión> · fleet presets · fleet models agy
+prama-agent fleet restart <sesión> · fleet kill <sesión> · fleet agents · fleet presets · fleet models agy
 prama-agent fleet hooks status               # hooks de salud de cada CLI
 ```
 
@@ -429,7 +438,9 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_HOOKS` / `PRAMA_STATUSLINE` | `1` / `1` | hooks de salud / telemetría de cuota |
 | `PRAMA_QUOTA_WARN` | `90` | umbral de alerta de cuota (%) |
 | `PRAMA_WATCHDOG` | `1` | watchdog de la flota |
-| `PRAMA_SWARM_WORKERS` | `agy:2` | ejecutores por defecto de `swarm` |
+| `PRAMA_SWARM_WORKERS` | `agy:2` | ejecutores por defecto de `swarm` (`auto`: elige el coordinador; `ask`: primero te propone) |
+| `PRAMA_SEND_DELAY` | `0.3` | pausa entre pegar un mensaje en un agente y presionar Enter (s) |
+| `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | cuánto tiempo `fleet agents` muestra bloqueada una cuenta tras un 429 (s) |
 | `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` | `M-m` / `M-a` / `M-c` | teclas de navegación en tmux |
 | `PRAMA_COMPACT_COLS` | `100` | clientes más angostos reciben el modo celular |
 | `PRAMA_FEEDBACK_MAX_OPEN` | `50` | reportes abiertos antes de pedir a los agentes que esperen |

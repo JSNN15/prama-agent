@@ -11,7 +11,7 @@
 #   prama-agent fleet model <session> <model>
 #   prama-agent fleet edit <session> [--model M] [--effort E] [--preset P|none] [--profile X] [--perm P]
 #   prama-agent fleet restart <session>
-#   prama-agent fleet presets | models [agent] | watchdog [status|start|stop|logs]
+#   prama-agent fleet agents [--json] | presets | models [agent] | watchdog [status|start|stop|logs]
 #
 # Guard rails when the caller is an agent: it can never act on itself or on a coordinator, only on
 # sessions inside PRAMA_FLEET_SCOPE (zone | children | all), and never grants more permissions than
@@ -289,6 +289,76 @@ _fleet_restart() {
   ok "$(_t "'%s' restarted (same conversation)." "$s")"
 }
 
+# _fleet_agents [--json] — the agents that can be launched, each account's last known quota and a
+# cost hint, so a coordinator picks by task and cost and never launches on an exhausted account.
+# Quota comes from the agents' status lines (account_quota_file); "unknown" until one has run.
+_fleet_agents() {
+  local json=0 a p f now sep='' q5 q7 r5 r7 ts st hint use warn=${PRAMA_QUOTA_WARN:-90} l_q bts bdet
+  [ "${1:-}" = --json ] && json=1
+  now=${EPOCHSECONDS:-$(date +%s)}
+  if (( json )); then printf '['
+  else printf '%s%s%s\n' "$C_BOLD" "$(_t 'Agents you can launch (the quota is per account and shared by all its agents):')" "$C_OFF"; fi
+  for a in "${AGENTS[@]}"; do
+    agent_installed "$a" || continue
+    local profiles=(default)
+    for f in "$PRAMA_BUS_DIR/accounts/$(slugify "$a")"-*.quota; do
+      [ -f "$f" ] || continue
+      p=${f##*/}; p=${p#"$(slugify "$a")-"}; p=${p%.quota}
+      [ "$p" != default ] && profile_allowed "$p" && profiles+=("$p")
+    done
+    for p in "${profiles[@]}"; do
+      f=$(account_quota_file "$a" "$p")
+      q5=$(_kv_get "$f" Q_5H) q7=$(_kv_get "$f" Q_7D) r5=$(_kv_get "$f" Q_5H_RESET) r7=$(_kv_get "$f" Q_7D_RESET)
+      ts=$(_kv_get "$f" Q_TS)
+      [[ "$q5" =~ ^[0-9]+$ ]] || q5=''
+      [[ "$q7" =~ ^[0-9]+$ ]] || q7=''
+      # A window whose reset time has passed starts again from zero.
+      [ -n "$q5" ] && [[ "$r5" =~ ^[0-9]+$ ]] && (( r5 <= now )) && q5=0
+      [ -n "$q7" ] && [[ "$r7" =~ ^[0-9]+$ ]] && (( r7 <= now )) && q7=0
+      bts=$(_kv_get "$f" BLOCKED_TS 0); bdet=''
+      [[ "$bts" =~ ^[0-9]+$ ]] && (( now - bts < ${PRAMA_ACCOUNT_BLOCK_TTL:-3600} )) && bdet=$(_kv_get "$f" BLOCKED_DETAIL)
+      st=unknown
+      if [ -n "$bdet" ]; then st=blocked
+      elif [ -n "$q5$q7" ]; then
+        st=ok
+        if (( ${q5:-0} >= 100 || ${q7:-0} >= 100 )); then st=exhausted
+        elif (( ${q5:-0} >= warn || ${q7:-0} >= warn )); then st=low; fi
+      fi
+      case "$a" in
+        claude) _tv hint 'haiku: cheapest (reading, search, mechanical edits) · sonnet: most code · opus: design and delicate changes' ;;
+        agy)    _tv hint "Gemini models: 'prama-agent fleet models agy'" ;;
+        opencode) _tv hint "OpenRouter models: 'prama-agent fleet models opencode' (:free ones cost nothing but may keep your prompts)" ;;
+        *)      hint='' ;;
+      esac
+      use="$a"; [ "$p" = default ] || use+=" --profile $p"
+      if (( json )); then
+        printf '%s{"agent":"%s","profile":"%s","status":"%s","five_hour_pct":%s,"five_hour_resets_at":%s,"seven_day_pct":%s,"seven_day_resets_at":%s,"updated":%s,"blocked":%s,"hint":"%s"}' \
+          "$sep" "$(json_escape "$a")" "$(json_escape "$p")" "$st" "${q5:-null}" \
+          "$( [[ "$r5" =~ ^[0-9]+$ ]] && printf '%s' "$r5" || printf null)" "${q7:-null}" \
+          "$( [[ "$r7" =~ ^[0-9]+$ ]] && printf '%s' "$r7" || printf null)" \
+          "$( [[ "$ts" =~ ^[0-9]+$ ]] && printf '%s' "$ts" || printf null)" \
+          "$( [ -n "$bdet" ] && printf '"%s"' "$(json_escape "$bdet")" || printf null)" "$(json_escape "$hint")"
+        sep=','
+      else
+        l_q=''
+        [ -n "$q5" ] && l_q+="5h $q5%"
+        [ -n "$q7" ] && l_q+="${l_q:+ · }7d $q7%"
+        case $st in
+          exhausted) local r=$r7; (( ${q5:-0} >= 100 )) && r=$r5
+                     printf '  %s⛔ %-22s %s%s\n' "$C_ERR" "$use" "$(_t 'exhausted (%s), resets %s' "$l_q" "$(_fmt_reset "$r")")" "$C_OFF" ;;
+          blocked)   printf '  %s⛔ %-22s %s%s\n' "$C_ERR" "$use" "$(_t 'blocked by its quota %s ago: %s' "$(( (now - bts) / 60 ))m" "$bdet")" "$C_OFF" ;;
+          low)       printf '  %s◔ %-22s %s%s\n' "$C_BRASS" "$use" "$(_t 'near the limit (%s)' "$l_q")" "$C_OFF" ;;
+          ok)        printf '  %s✔ %-22s%s %s\n' "$C_LIVE" "$use" "$C_OFF" "$l_q" ;;
+          *)         printf '  %s? %-22s%s %s\n' "$C_MUTED" "$use" "$C_OFF" "$(_t 'quota not known yet')" ;;
+        esac
+        [ -n "$hint" ] && printf '      %s%s%s\n' "$C_MUTED" "$hint" "$C_OFF"
+      fi
+    done
+  done
+  (( json )) && printf ']\n'
+  return 0
+}
+
 _fleet_presets() {
   local n f desc any=0 l_any
   _tv l_any 'any agent'
@@ -386,6 +456,7 @@ ${C_BOLD}prama-agent fleet${C_OFF} — fleet management (for humans and coordina
   edit <session> --model/--effort/--preset/--profile/--perm …
   restart <session>                       relaunches the agent, keeping the conversation
   kill <session>                          closes the agent
+  agents [--json]                         agents you can launch, each account's quota and a cost hint
   presets                                 available presets and installed agents
   models [claude|opencode|agy]            accepted models
   watchdog [status|start|stop|logs|tick]  fleet watchdog (alerts, quota and queue delivery)
@@ -408,6 +479,7 @@ ${C_BOLD}prama-agent fleet${C_OFF} — gestión de la flota (para humanos y coor
   edit <sesión> --model/--effort/--preset/--profile/--perm …
   restart <sesión>                        relanza el agente conservando la conversación
   kill <sesión>                           cierra el agente
+  agents [--json]                         agentes que se pueden lanzar, cuota de cada cuenta y costo
   presets                                 presets disponibles y agentes instalados
   models [claude|opencode|agy]            modelos aceptados
   watchdog [status|start|stop|logs|tick]  vigilante de la flota (alertas, cuota y entrega de colas)
@@ -428,6 +500,7 @@ subcmd_fleet() {
     model)          _fleet_model "$@" ;;
     edit|set)       _fleet_edit "$@" ;;
     restart)        _fleet_restart "$@" ;;
+    agents|accounts) _fleet_agents "$@" ;;
     presets)        _fleet_presets ;;
     models)         _fleet_models "$@" ;;
     watchdog|watch) _fleet_watchdog "$@" ;;

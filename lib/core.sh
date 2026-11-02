@@ -264,10 +264,25 @@ tmx_kill() {
   return 0
 }
 
-# Types text literally into a session and presses Enter.
+# Pastes text into a session and presses Enter. The text goes in as one paste (bracketed when the
+# CLI asked for it; plain keys otherwise) and Enter follows after a short pause: a CLI that is still
+# starting up treats a burst of keys plus Enter as a multi-line paste, and the message sits in its
+# prompt unsent ("[Pasted text #1 +1 lines]").
 tmx_send() {
-  local s=$1 text=$2
-  tmx send-keys -t "=$s:" -l -- "$text" && tmx send-keys -t "=$s:" Enter
+  local s=$1 text=$2 buf="prama-send-$$-$RANDOM"
+  printf '%s' "$text" | tmx load-buffer -b "$buf" - || return 1
+  tmx paste-buffer -p -d -b "$buf" -t "=$s:" || { tmx delete-buffer -b "$buf" 2>/dev/null; return 1; }
+  sleep "${PRAMA_SEND_DELAY:-0.3}"
+  tmx send-keys -t "=$s:" Enter || return 1
+  # Lets the watchdog submit this message if it still sits in the prompt (never the operator's own).
+  [ -f "$(state_file "$s")" ] && state_set "$s" SENT_TS="${EPOCHSECONDS:-$(date +%s)}"
+  return 0
+}
+
+# True when a session's prompt holds a paste that was never submitted (Claude Code shows it as
+# "[Pasted text #N …]" on the input line).
+tmx_unsent_paste() {
+  tmx_capture "$1" 8 | grep -q '^[❯>] *\[Pasted text #[0-9]'
 }
 
 # Prints the last N lines of a session's active pane (ansi=1 keeps colors).
@@ -647,6 +662,9 @@ health_get()  { _kv_get "$(health_file "$1")" "$2" "${3:-}"; }
 # used %)  COST (USD)  Q_MODEL  Q_PLAN  Q_TS
 quota_file() { local f; f=$(state_file "$1"); printf '%s' "${f%.env}.quota"; }
 quota_get()  { _kv_get "$(quota_file "$1")" "$2" "${3:-}"; }
+# Quota is per account (agent + profile), not per session: the last reading of any session of an
+# account is kept here, so a coordinator can see an exhausted account before launching on it.
+account_quota_file() { printf '%s/accounts/%s-%s.quota' "$PRAMA_BUS_DIR" "$(slugify "$1")" "$(slugify "${2:-default}")"; }
 
 # _kv_get <file> <KEY> [default]
 _kv_get() {

@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.8.0] - 2026-11-02
+
+### Added
+- **The coordinator picks its executors**: `swarm --workers auto` creates a team with its coordinator
+  alone, told to plan and launch the cheapest agent and model that fits each task; `--workers ask`
+  makes it propose the team (agent, model, how many, why, which quota) and wait for the operator's OK.
+  The new-team menu offers both before the list of agents.
+- **`fleet agents [--json]`**: the agents that can be launched, each account's quota (5h and 7d windows,
+  resets), whether a 429 blocked it recently and a cost hint per agent. Quota is now kept per account
+  (agent + profile), so it outlives the sessions that reported it. Coordinators are told to check it
+  before launching anyone and to ask the operator when the choice is costly or nothing fits.
+
+### Fixed
+- A message typed into an agent that was still starting up (the team brief, typically) could stay in
+  Claude Code's prompt as `[Pasted text #1 +1 lines]` until someone pressed Enter: the Enter arrived
+  inside the paste. Messages are now pasted as one bracketed paste with a short pause before Enter
+  (`PRAMA_SEND_DELAY`, 0.3 s), and the watchdog submits a message prama typed that is still sitting in
+  the prompt, once, within two minutes (never a paste of the operator's).
+
 ## [6.7.0] - 2026-11-01
 
 ### Added
