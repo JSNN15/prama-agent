@@ -70,4 +70,5 @@ I18N+=(
   ["Removed the 'prama-agent' entry from %s."]='Entrada '\''prama-agent'\'' eliminada de %s.'
   ['Usage: prama-agent fleet hooks [status|install|uninstall]']='Uso: prama-agent fleet hooks [status|install|uninstall]'
   ["Unknown fleet subcommand: '%s' (prama-agent fleet help)"]='Subcomando de fleet desconocido: '\''%s'\'' (prama-agent fleet help)'
+  ['An agent cannot raise another'\''s permissions above its own (%s).']='Un agente no puede subirle los permisos a otro por sobre los suyos (%s).'
 )

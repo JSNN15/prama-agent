@@ -171,7 +171,8 @@ _plan_flags() {
         done
       fi ;;
     done)
-      if [[ ${P_checked[i]} == *:0:* ]]; then PF+=' checked'
+      # A pass on a tree with uncommitted changes proves nothing about the commit: not "checked".
+      if [[ ${P_checked[i]} == *:0:* && ${P_checked[i]} != *+dirty ]]; then PF+=' checked'
       elif [ -z "${P_evidence[i]}" ]; then PF+=' unverified'; fi ;;
     todo) _plan_ready "$i" && PF+=' ready' ;;
   esac
@@ -321,6 +322,11 @@ plan_verify() {
   [ -n "$dir" ] && [ -d "$dir" ] || dir=$(zone_dir "$PL_ZONE")
   [ -d "$dir" ] || die "$(_t 'Directory not found: %s' "$dir")"
   sha=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || true)
+  # The check runs on the working tree. With uncommitted changes the result is not the commit's,
+  # so it is recorded as <commit>+dirty and never shows as checked by prama.
+  local dirty=0
+  [ -n "$sha" ] && dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -c . || true)
+  (( dirty > 0 )) && sha+='+dirty'
   info_msg "$(_t 'Checking %s in %s: %s' "$id" "$dir${sha:+ @$sha}" "$accept")"
   if [ -z "${PRAMA_SESSION:-}" ] && (( ! yes )) && [ -t 0 ]; then
     local ans
@@ -334,7 +340,11 @@ plan_verify() {
   _plan_tx _plan_m_verify "$id" "$rc" "$sha" "${last:0:120}" "$mark" || return 1
   bus_event verify "${PRAMA_SESSION:-operator}" "${owner:-$PL_COORD}" "$id rc=$rc${sha:+ @$sha}" "$rc"
   if (( rc == 0 )); then
-    ok "$(_t '%s: the acceptance check passed; recorded as evidence.' "$id")"
+    if (( dirty > 0 )); then
+      warn "$(_t '%s: the acceptance check passed, but %s has %d uncommitted file(s): recorded as evidence, not as checked by prama. Commit and verify again.' "$id" "$dir" "$dirty")"
+    else
+      ok "$(_t '%s: the acceptance check passed; recorded as evidence.' "$id")"
+    fi
     (( mark )) && ok "$(_t '%s done.' "$id")"
     return 0
   fi

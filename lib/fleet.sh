@@ -13,9 +13,11 @@
 #   prama-agent fleet restart <session>
 #   prama-agent fleet presets | models [agent] | watchdog [status|start|stop|logs]
 #
-# Guard rails when the caller is an agent (PRAMA_SESSION set): it can never act on itself or on
-# a coordinator, and only on sessions inside PRAMA_FLEET_SCOPE (zone | children | all).
-# spawn is capped by PRAMA_FLEET_MAX live agents. Every action lands in the event log.
+# Guard rails when the caller is an agent: it can never act on itself or on a coordinator, only on
+# sessions inside PRAMA_FLEET_SCOPE (zone | children | all), and never grants more permissions than
+# it has. spawn is capped by PRAMA_FLEET_MAX live agents. Every action lands in the event log.
+# The caller is the pane the command runs under (prama_resolve_caller), else PRAMA_SESSION. These
+# are guard rails against mistakes, not a security boundary: see SECURITY.md.
 
 _fleet_caller() { printf '%s' "${PRAMA_SESSION:-operator}"; }
 
@@ -147,7 +149,7 @@ _fleet_status() {
 _fleet_spawn() {
   local agent='' zone='' name='' wt='' task='' json=0 arg m
   local role=executor profile=default perm=ask remote=${PRAMA_DEFAULT_REMOTE:-0}
-  local a_exp=0 r_exp=0 p_exp=0
+  local a_exp=0 r_exp=0 p_exp=0 perm_exp=0
   (( ${PRAMA_SKIP_PERMISSIONS:-0} )) && perm=yolo
   local pass=()
   AGENT_MODEL='' AGENT_EFFORT='' PRESET=''
@@ -162,9 +164,9 @@ _fleet_spawn() {
       --name|-n)    name=${2:?$(_t '--name requires a name')}; shift 2 ;;
       --worktree|-w) wt=${2:?$(_t '--worktree requires a branch')}; shift 2 ;;
       --task)       task=${2:?$(_t '--task requires an instruction')}; shift 2 ;;
-      --yolo)       perm=yolo; shift ;;
-      --ask)        perm=ask; shift ;;
-      --plan)       perm=plan; shift ;;
+      --yolo)       perm=yolo; perm_exp=1; shift ;;
+      --ask)        perm=ask; perm_exp=1; shift ;;
+      --plan)       perm=plan; perm_exp=1; shift ;;
       --remote)     remote=1; shift ;;
       --no-remote)  remote=0; shift ;;
       --json)       json=1; shift ;;
@@ -176,6 +178,7 @@ _fleet_spawn() {
         shift ;;
     esac
   done
+  (( perm_exp )) || perm=$(perm_cap_default "$perm")
   AGENT=$agent ROLE=$role PROFILE=$profile
   preset_apply_defaults "$a_exp" "$r_exp" "$p_exp" || exit 1
   agent=$AGENT role=$ROLE profile=$PROFILE
@@ -259,9 +262,14 @@ _fleet_edit() {
       --preset)   v=${2:?}; [ "$v" = none ] && v=''
                   [ -z "$v" ] || preset_find "$v" >/dev/null || die "$(_t "Unknown preset: '%s'" "$v")"
                   kv+=("PRESET=$v"); shift 2 ;;
-      --profile|-P) v=${2:?}; is_in "$v" "${AVAILABLE_PROFILES[@]}" || die "$(_t "Unknown profile: '%s'" "$v")"; kv+=("PROFILE=$v"); shift 2 ;;
+      --profile|-P) v=${2:?}; profile_allowed "$v" || die "$(_t "The '%s' profile is not allowed on this host (PRAMA_PROFILES=%s)." "$v" "${PRAMA_PROFILES:-}")"
+                  is_in "$v" "${AVAILABLE_PROFILES[@]}" || die "$(_t "Unknown profile: '%s'" "$v")"; kv+=("PROFILE=$v"); shift 2 ;;
       --perm)     v=${2:?}; is_in "$v" "${AVAILABLE_PERM_MODES[@]}" || die "--perm: ${AVAILABLE_PERM_MODES[*]}"
                   [ "$(session_role "$s")" = reader ] && [ "$v" != plan ] && die "$(_t 'A reader is always plan.')"
+                  perm_allowed "$v" || die "$(_t 'This host does not allow yolo (PRAMA_ALLOW_YOLO=0): use --ask or --plan.')"
+                  if [ -n "${PRAMA_SESSION:-}" ] && (( $(perm_rank "$v") > $(perm_rank "$(state_get "$PRAMA_SESSION" PERM ask)") )); then
+                    die "$(_t "An agent cannot raise another's permissions above its own (%s)." "$(state_get "$PRAMA_SESSION" PERM ask)")"
+                  fi
                   kv+=("PERM=$v"); shift 2 ;;
       *) die "$(_t "Unrecognized option for fleet edit: '%s'" "$1")" ;;
     esac

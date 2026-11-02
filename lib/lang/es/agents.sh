@@ -31,4 +31,7 @@ I18N+=(
   ['Model']='Modelo'
   ['◉ PLAN (read-only)']='◉ PLAN (solo lectura)'
   ['● ASK (confirm each action)']='● ASK (confirma cada acción)'
+  ['The '\''%s'\'' profile is not allowed on this host (PRAMA_PROFILES=%s).']='El perfil '\''%s'\'' no está permitido en este servidor (PRAMA_PROFILES=%s).'
+  ['An agent cannot launch another with more permissions than its own (%s → %s).']='Un agente no puede lanzar a otro con más permisos que los suyos (%s → %s).'
+  ['An agent cannot pass '\''%s'\'' to the agent it launches.']='Un agente no puede pasarle '\''%s'\'' al agente que lanza.'
 )

@@ -25,6 +25,33 @@ All notable changes to this project are documented here. The format follows
 - `docs/HOW-IT-WAS-BUILT.md` (and `.es.md`): how prama-agent was built with AI coding agents,
   including the ones it orchestrated itself, and what broke on the way.
 
+### Security
+Hardening after two independent reviews of v6.6.0. See [docs/HARDENING.md](docs/HARDENING.md) for
+running prama on a shared or production host.
+- **The caller is identified by process.** When a command runs under an agent's pane, that pane's
+  session is the caller, whatever `PRAMA_SESSION` says: `env -u PRAMA_SESSION prama-agent fleet kill …`
+  no longer turns an agent into the operator, and the attempt is logged as an `identity` event.
+- **Permissions never grow from agent to agent.** An agent cannot launch another (`fleet spawn`, a
+  direct launch) or raise one (`fleet edit --perm`) above its own mode, nor pass a permission flag
+  (`--dangerously-skip-permissions`, `--permission-mode`, `--settings`…) through `--`. A yolo default
+  (`PRAMA_SKIP_PERMISSIONS=1`) is lowered to the calling agent's mode.
+- **Host policy:** `PRAMA_ALLOW_YOLO=0` forbids yolo everywhere, including restarts of agents saved as
+  yolo; `PRAMA_PROFILES` lists the provider profiles allowed; `PRAMA_TG_SCREENS=0` keeps agent screens
+  off Telegram. `prama-agent doctor` shows the policy and warns when the user is in the `docker`,
+  `sudo` or `lxd` group.
+- **`worktree merge --pr`** (or `PRAMA_MERGE_MODE=pr`): pushes the branch and opens a pull request
+  against the team's base with `gh`, so the zone's checkout is never written and CI decides.
+- `IS_SANDBOX=1` is exported only for yolo **as root**, where Claude Code needs it to accept
+  `--dangerously-skip-permissions`.
+- Coordinators are told that reports are what an agent wrote, not the operator's instructions, and to
+  treat them as data (a manipulated executor can repeat a hostile file's instructions).
+- `plan verify` on a tree with uncommitted changes records `<commit>+dirty` and never shows the task
+  as checked by prama.
+- `jq` is required: the installer refuses to install without it, and the test suite stops with a clear
+  message instead of failing dozens of checks.
+- The security model is stated plainly in SECURITY.md and the guide: guard rails against mistakes, not
+  a boundary against a hostile agent running as the same user.
+
 ### Changed
 - **README rewritten around one idea, "don't trust what your agents say; check it"**: what prama
   checks, an honest comparison with Claude Squad, Agent of Empires, Gas Town and Claude Code agent

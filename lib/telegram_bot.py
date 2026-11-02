@@ -48,6 +48,9 @@ WATCH_INTERVAL = 2.0
 WATCH_MAX = 12.0
 MAX_LISTED = 25
 MAX_WORKERS = 6            # workers per team created from Telegram
+# PRAMA_TG_SCREENS=0: no agent screen ever leaves the host through Telegram (what is on an agent's
+# screen can be credentials or customer data); sending text and every other view keep working.
+SCREENS = os.environ.get("PRAMA_TG_SCREENS", "1") != "0"
 TEAM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
 DEFAULT_TEAM = "principal"  # team name stored by the CLI: data, never translated
 # Suggested names for a new team (they become part of session names), per interface language.
@@ -318,6 +321,8 @@ class Prama:
         return (level if level in NOTIFY_LEVELS else "all"), (int(until) if until.isdigit() else 0)
 
     def capture(self, name, lines=SNAP_LINES):
+        if not SCREENS:
+            return _("(screens are not sent from this host: PRAMA_TG_SCREENS=0)")
         return self.ok(["capture", name, str(lines)], timeout=15)
 
 
@@ -921,6 +926,8 @@ class Bot:
             self.prama.ok(["send", name, text], timeout=20)
         except CliError as ex:
             return self.send(*self.view_error(_("Could not send to %s: %s") % (name, ex)))
+        if not SCREENS:
+            return self.send(_("📨 Sent to <b>%s</b>.") % e(name), self.snapshot_kb(name))
         mid = self.send(_("📨 Sent to <b>%s</b>. Waiting for the reply…") % e(name))
         if mid:
             t = threading.Thread(target=self._watch, args=(name, mid, before), daemon=True)

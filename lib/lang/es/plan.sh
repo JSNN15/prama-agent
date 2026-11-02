@@ -76,6 +76,7 @@ I18N+=(
   ['Directory not found: %s']='No existe el directorio: %s'
   ['Checking %s in %s: %s']='Verificando %s en %s: %s'
   ['Run this command? [y/N]']='¿Ejecutar este comando? [s/N]'
+  ['%s: the acceptance check passed, but %s has %d uncommitted file(s): recorded as evidence, not as checked by prama. Commit and verify again.']='%s: la verificación de aceptación pasó, pero %s tiene %d archivo(s) sin commit: queda como evidencia, no como verificada por prama. Haz commit y verifica de nuevo.'
   ['%s: the acceptance check passed; recorded as evidence.']='%s: la verificación de aceptación pasó; queda registrada como evidencia.'
   ['✖ %s: its acceptance check failed (exit %d%s): %s']='✖ %s: su verificación de aceptación falló (código %d%s): %s'
   ['%s was marked done: reopened, it is in progress again.']='%s estaba marcada lista: se reabrió y vuelve a estar en curso.'

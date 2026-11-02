@@ -315,9 +315,16 @@ Design guarantees (details in [docs/ARCHITECTURE.md](ARCHITECTURE.md)):
 - Exact tmux targets: stopping `prama-claude` never closes `prama-claude-backend`.
 - Stopping a session sends TERM, then KILL, to each pane's process group, so an agent that ignores
   `SIGHUP` does not survive it.
+- **An agent never grants more than it has.** It cannot launch or edit another agent with more
+  permissions than its own, nor pass a permission flag to the CLI it launches.
+- **Host policy:** `PRAMA_ALLOW_YOLO=0` refuses yolo everywhere, `PRAMA_PROFILES` lists the provider
+  profiles allowed, `PRAMA_TG_SCREENS=0` keeps agent screens off Telegram, and `PRAMA_MERGE_MODE=pr`
+  turns merges into pull requests. `prama-agent doctor` shows the policy in force.
 - **Roles are guard rails, not a sandbox.** Who may merge, change the plan or manage the fleet is
-  decided by the caller's `PRAMA_SESSION`; an agent with a shell could unset it. The rules prevent
-  mistakes; to contain a hostile agent, run the agents as a separate user, in a container or a VM.
+  decided by the caller: the session of the pane the command runs under, else `PRAMA_SESSION`. Every
+  agent still runs as your user and could edit prama's files. The rules prevent mistakes; to contain a
+  hostile agent, run the agents as a separate user, in a container or a VM. See
+  [running prama on a shared or production host](HARDENING.md).
 
 Report vulnerabilities as described in [SECURITY.md](../SECURITY.md).
 

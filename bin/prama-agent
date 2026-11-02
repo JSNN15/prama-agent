@@ -76,6 +76,12 @@ for _m in core ui agents roles bus swarm worktrees plan health fleet feedback me
 done
 
 prama_init
+agents_apply_policy
+# The runner is the pane's own process: it sets PRAMA_SESSION itself.
+[ "${1:-}" = "--internal-runner" ] || prama_resolve_caller
+if [ -n "${PRAMA_CALLER_MISMATCH:-}" ]; then
+  bus_event identity "$PRAMA_SESSION" "$PRAMA_SESSION" "PRAMA_SESSION was '$PRAMA_CALLER_MISMATCH': acting as the pane's session"
+fi
 command -v tmux >/dev/null 2>&1 || die "$(_t 'tmux is not installed (sudo apt install tmux).')"
 
 # ── Small helpers ───────────────────────────────────────────────────────────
@@ -614,7 +620,7 @@ subcmd_doctor() {
     if agy_hooks_installed; then box_row "$C_BORDER_HI" "$good $(_t 'agy hooks installed (~/.gemini/config/hooks.json)')"
     else box_row "$C_BORDER_HI" "${C_MUTED}$(_t '○ agy hooks: installed when agy is launched (prama-agent fleet hooks)')${C_OFF}"; fi
   fi
-  command -v jq >/dev/null 2>&1 || box_row "$C_BORDER_HI" "$meh $(_t 'jq not installed: no quota telemetry or agy hooks (sudo apt install jq)')"
+  command -v jq >/dev/null 2>&1 || box_row "$C_BORDER_HI" "$bad $(_t 'jq not installed: no quota telemetry or agy hooks (sudo apt install jq)')"
 
   box_row "$C_BORDER_HI" "$good $(_t 'Private state (0700)') ${C_MUTED}$PRAMA_STATE_HOME${C_OFF}"
   local fb; fb=$(feedback_open_count)
@@ -629,6 +635,19 @@ subcmd_doctor() {
       box_row "$C_BORDER_HI" "$meh $(_t 'YOLO enabled by default (PRAMA_SKIP_PERMISSIONS=1)')"
     fi
   fi
+  # The host policy at a glance (docs/HARDENING.md).
+  local pol_yolo pol_prof pol_merge pol_tg
+  if perm_allowed yolo; then _tv pol_yolo 'allowed'; else _tv pol_yolo 'off'; fi
+  pol_prof=${PRAMA_PROFILES:-$(_t 'all')}
+  pol_merge=${PRAMA_MERGE_MODE:-local}
+  if [ "${PRAMA_TG_SCREENS:-1}" = 0 ]; then _tv pol_tg 'off'; else _tv pol_tg 'sent'; fi
+  box_row "$C_BORDER_HI" "$good $(_t 'Policy: yolo %s · profiles %s · merges %s · Telegram screens %s' "$pol_yolo" "$pol_prof" "$pol_merge" "$pol_tg")"
+  local grp
+  for grp in docker sudo lxd; do
+    if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx "$grp"; then
+      box_row "$C_BORDER_HI" "$meh $(_t "Your user is in the '%s' group: agents can get root. See docs/HARDENING.md." "$grp")"
+    fi
+  done
 
   # Detach clients idle for more than 6h (zombie SSH sessions that pin the window size)
   local c_tty c_sess c_act now detached=0
@@ -864,6 +883,7 @@ done
 # A preset may pick the agent, role and endpoint profile (explicit flags win).
 preset_apply_defaults "$AGENT_EXPLICIT" "$ROLE_EXPLICIT" "$PROFILE_EXPLICIT" || exit 1
 
+(( PERM_EXPLICIT )) || PERM_MODE=$(perm_cap_default "$PERM_MODE")
 if [ "$ROLE" = "reader" ]; then
   [ "$PERM_EXPLICIT" = 1 ] && [ "$PERM_MODE" != "plan" ] && warn "$(_t 'The reader role forces plan mode (read-only).')"
   PERM_MODE="plan"
@@ -886,6 +906,8 @@ if (( DRY || DIRECT )); then
   DIR=$(zone_dir "$ZONE") || die "$(_t "Zone '%s' is not registered." "$ZONE")"
   [ -d "$DIR" ] || die "$(_t "Directory '%s' of zone '%s' does not exist." "$DIR" "$ZONE")"
   agent_installed "$AGENT" || die "$(_t "Agent '%s' is not installed." "$AGENT")"
+  perm_allowed "$PERM_MODE" || die "$(_t 'This host does not allow yolo (PRAMA_ALLOW_YOLO=0): use --ask or --plan.')"
+  _launch_check_caller "$PERM_MODE" || exit 1
   SESSION_NAME=${CUSTOM_NAME:-$(session_name_for "$AGENT" "$ZONE" "$ROLE" "$WORKTREE")}
   TARGET_DIR=$DIR
   if [ -n "$WORKTREE" ]; then
@@ -904,7 +926,7 @@ if (( DRY || DIRECT )); then
   apply_provider_profile "$PROFILE"
   agent_runtime_env "$AGENT" "$SESSION_NAME" "$PERM_MODE" "$ROLE_PROMPT"
   cd "$TARGET_DIR" || die "$(_t 'Could not enter %s' "$TARGET_DIR")"
-  if [ "$PERM_MODE" = "yolo" ]; then export IS_SANDBOX=1; else unset IS_SANDBOX; fi
+  _runner_sandbox "$PERM_MODE"
   export PRAMA_SESSION="$SESSION_NAME" PRAMA_ROLE="$ROLE"
   exec "${CMD[@]}"
 fi

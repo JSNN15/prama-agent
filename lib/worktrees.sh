@@ -147,16 +147,18 @@ _wt_worker() {
 # worktree merge <worker session> [--keep-conflicts] — merges its branch into the team's base,
 # in the zone's checkout. The checkout must be clean and on the base branch.
 wt_merge() {
-  local s='' keep=0 dir base cur out conflicts test=${PRAMA_MERGE_TEST:-}
+  local s='' keep=0 dir base cur out conflicts test=${PRAMA_MERGE_TEST:-} mode=${PRAMA_MERGE_MODE:-local}
   while (( $# )); do
     case $1 in
       --keep-conflicts) keep=1; shift ;;
+      --pr) mode="pr"; shift ;;
+      --local) mode=local; shift ;;
       --test) test=${2:?$(_t '--test requires a command')}; shift 2 ;;
       --no-test) test=''; shift ;;
       *) s=$1; shift ;;
     esac
   done
-  [ -n "$s" ] || die "$(_t 'Usage: prama-agent worktree merge <worker session> [--test "<command>"] [--keep-conflicts]')"
+  [ -n "$s" ] || die "$(_t 'Usage: prama-agent worktree merge <worker session> [--test "<command>"] [--keep-conflicts] [--pr|--local]')"
   _wt_worker "$s"
   # Integrating into the base is the coordinator's job (or the operator's), never an executor's.
   if [ -n "${PRAMA_SESSION:-}" ] && [ "$PRAMA_SESSION" != "$WT_COORD" ]; then
@@ -164,6 +166,7 @@ wt_merge() {
   fi
   dir=$(zone_dir "$(state_get "$WT_COORD" ZONE)")
   base=$(team_base "$WT_COORD")
+  if [ "$mode" = pr ]; then _wt_merge_pr "$base"; return; fi
   cur=$(git -C "$dir" symbolic-ref --short -q HEAD)
   [ "$cur" = "$base" ] || die "$(_t "The zone's checkout is on '%s', not on the team's base '%s': switch it first (git -C %s switch %s)." "$cur" "$base" "$dir" "$base")"
   [ -z "$(git -C "$dir" status --porcelain --untracked-files=no)" ] \
@@ -202,6 +205,35 @@ wt_merge() {
   git -C "$dir" merge --abort >/dev/null 2>&1 || true
   bus_event conflict "${PRAMA_SESSION:-operator}" "$WT_W" "$WT_WB → $base: $conflicts"
   die "$(_t 'Merge of %s aborted, %s is unchanged. Conflicts: %s. Ask %s to run prama-agent worktree sync (merges %s into its branch), resolve them and commit; then merge again.' "$WT_WB" "$base" "${conflicts:-${out:0:200}}" "$WT_W" "$base")"
+}
+
+# PRAMA_MERGE_MODE=pr (or --pr): the branch is pushed and a pull request opened against the base,
+# so the zone's checkout is never written and the repository's CI and review decide. Use it when
+# the zone folder is live (mounted into a running service) or when main is protected.
+_wt_merge_pr() {
+  local base=$1 remote=${PRAMA_MERGE_REMOTE:-origin} out url title body dirty
+  command -v gh >/dev/null 2>&1 || die "$(_t 'PRAMA_MERGE_MODE=pr needs the GitHub CLI (gh), signed in.')"
+  if [ -z "$(git -C "$WT_WD" rev-list "$base..$WT_WB" 2>/dev/null)" ]; then
+    info_msg "$(_t 'Nothing to merge: %s has no commits that %s lacks.' "$WT_WB" "$base")"; return 0
+  fi
+  dirty=$(git -C "$WT_WD" status --porcelain 2>/dev/null | grep -c . || true)
+  (( dirty > 0 )) && warn "$(_t '%s has %d uncommitted file(s); only its commits are merged.' "$WT_W" "$dirty")"
+  out=$(git -C "$WT_WD" push -u "$remote" "$WT_WB" 2>&1) \
+    || die "$(_t 'Could not push %s to %s: %s' "$WT_WB" "$remote" "${out:0:300}")"
+  if url=$(cd "$WT_WD" && gh pr view "$WT_WB" --json url --jq .url 2>/dev/null) && [ -n "$url" ]; then
+    ok "$(_t 'Pull request already open, now updated: %s' "$url")"
+  else
+    title="$WT_WB (prama: $WT_W)"
+    body="$(git -C "$WT_WD" log --reverse --format='- %s' "$base..$WT_WB" 2>/dev/null)
+
+Opened by \`prama-agent worktree merge\` (PRAMA_MERGE_MODE=pr): CI and review decide the merge."
+    url=$(cd "$WT_WD" && gh pr create --base "$base" --head "$WT_WB" --title "$title" --body "$body" 2>&1) \
+      || die "$(_t 'Could not open the pull request: %s' "${url:0:300}")"
+    url=${url##*$'\n'}
+    ok "$(_t 'Pull request opened: %s' "$url")"
+  fi
+  bus_event merged "${PRAMA_SESSION:-operator}" "$WT_W" "$WT_WB → $base (PR $url)"
+  return 0
 }
 
 # After a merge, tell which other workers are now behind the base.

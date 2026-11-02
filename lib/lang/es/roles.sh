@@ -38,4 +38,5 @@ I18N+=(
   ['⌘ Action [r/s/m/q]:']='⌘ Acción [r/s/m/q]:'
   ['↻ Relaunching the agent...']='↻ Relanzando agente...'
   ['▸ Shell in %s (type "exit" to return to the supervisor)']='▸ Shell en %s (escribe "exit" para volver al supervisor)'
+  ['This host does not allow yolo (PRAMA_ALLOW_YOLO=0): the agent starts in ask mode.']='Este servidor no permite yolo (PRAMA_ALLOW_YOLO=0): el agente parte en modo ask.'
 )

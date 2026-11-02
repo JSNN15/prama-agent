@@ -140,6 +140,9 @@ flowchart LR
   append-only". The internals are in [ARCHITECTURE](docs/ARCHITECTURE.md).
 - **[How it was built](docs/HOW-IT-WAS-BUILT.md)**: with its own fleet of agents, and what broke on the
   way.
+- **[On a shared or production host](docs/HARDENING.md)**: what the guard rails do and do not
+  protect, and a hardened configuration (no yolo, allowed providers only, pull requests, no screens on
+  Telegram).
 - [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) ·
   [Security](SECURITY.md)
 

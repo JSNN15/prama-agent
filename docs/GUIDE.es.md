@@ -326,10 +326,18 @@ Garantías de diseño (detalle en [docs/ARCHITECTURE.md](ARCHITECTURE.md)):
 - Objetivos tmux exactos: cerrar `prama-claude` nunca cierra `prama-claude-backend`.
 - Cerrar una sesión envía TERM, y luego KILL, al grupo de procesos de cada panel: un agente que ignora
   `SIGHUP` no sobrevive.
+- **Un agente nunca da más de lo que tiene.** No puede lanzar ni editar a otro agente con más permisos
+  que los suyos, ni pasarle un flag de permisos al CLI que lanza.
+- **Política del servidor:** `PRAMA_ALLOW_YOLO=0` rechaza yolo en todas partes, `PRAMA_PROFILES` lista
+  los perfiles de proveedor permitidos, `PRAMA_TG_SCREENS=0` deja las pantallas de los agentes fuera de
+  Telegram y `PRAMA_MERGE_MODE=pr` convierte los merges en pull requests. `prama-agent doctor` muestra
+  la política vigente.
 - **Los roles son barandas, no un sandbox.** Quién puede hacer merge, cambiar el plan o administrar la
-  flota se decide por el `PRAMA_SESSION` de quien llama; un agente con shell podría quitárselo. Las
-  reglas evitan errores; para contener a un agente hostil, corre los agentes con otro usuario, en un
-  contenedor o en una VM.
+  flota se decide por quien llama: la sesión del panel bajo el que corre el comando o, si no hay,
+  `PRAMA_SESSION`. Aun así, todos los agentes corren con tu usuario y podrían editar los archivos de
+  prama. Las reglas evitan errores; para contener a un agente hostil, corre los agentes con otro
+  usuario, en un contenedor o en una VM. Ver [prama en un servidor compartido o de
+  producción](HARDENING.es.md).
 
 Para reportar vulnerabilidades, ver [SECURITY.md](../SECURITY.md).
 

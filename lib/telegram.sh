@@ -467,7 +467,7 @@ tg_start() {
   # speaks it whatever the tmux server's environment; the locale too, for PRAMA_LANG=auto.
   envs+=("PRAMA_LANG=$PRAMA_UI_LANG")
   local v
-  for v in PRAMA_TG_API_BASE PRAMA_TG_PYTHON PRAMA_TG_RESTART_DELAY PRAMA_TG_MAX_CRASHES LC_ALL LC_MESSAGES LANG; do
+  for v in PRAMA_TG_API_BASE PRAMA_TG_SCREENS PRAMA_TG_PYTHON PRAMA_TG_RESTART_DELAY PRAMA_TG_MAX_CRASHES LC_ALL LC_MESSAGES LANG; do
     [ -n "${!v:-}" ] && envs+=("$v=${!v}")
   done
   local cmd

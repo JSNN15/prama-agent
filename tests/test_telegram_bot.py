@@ -221,6 +221,20 @@ class Teams(unittest.TestCase):
         self.assertIn("sin datos aún", text)
 
 
+class Screens(unittest.TestCase):
+    def test_screens_off_never_sends_a_capture(self):
+        bot, api, prama = make_bot()
+        old, tb.SCREENS = tb.SCREENS, False
+        try:
+            bot.show_snapshot(COORD)
+            self.assertIn("PRAMA_TG_SCREENS=0", api.last_text())
+            bot.deliver_text(COORD, "status?")
+            self.assertIn(["send", COORD, "status?"], prama.ran)
+            self.assertFalse([a for a in prama.ran if a[0] == "capture"])
+        finally:
+            tb.SCREENS = old
+
+
 class Reports(unittest.TestCase):
     def test_reports_are_listed_escaped(self):
         bot, api, _ = make_bot()

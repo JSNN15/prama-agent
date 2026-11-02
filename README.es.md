@@ -143,6 +143,9 @@ flowchart LR
   [ARCHITECTURE](docs/ARCHITECTURE.md).
 - **[Cómo se construyó](docs/HOW-IT-WAS-BUILT.es.md)**: con su propia flota de agentes, y lo que se
   rompió en el camino.
+- **[En un servidor compartido o de producción](docs/HARDENING.es.md)**: qué protegen las barandas y
+  qué no, y una configuración endurecida (sin yolo, solo proveedores permitidos, pull requests, sin
+  pantallas en Telegram).
 - [Hoja de ruta](docs/ROADMAP.md) · [Cambios](CHANGELOG.md) · [Contribuir](CONTRIBUTING.md) ·
   [Seguridad](SECURITY.md)
 
