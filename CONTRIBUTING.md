@@ -43,7 +43,7 @@ make test-matrix   # the CI matrix in local containers (needs Docker): tmux 3.2a
   `lib/lang/es/telegram_bot.json`). The msgid is a one-line literal with printf placeholders; never
   translate at source time, never translate JSON, events or other machine output. `make lint` runs
   `tools/i18n_check.py`; `make i18n` also lists catalog entries nobody uses.
-- Document new behaviour in both `README.md` and `README.es.md`, and add an entry to `CHANGELOG.md`.
+- Document new behaviour in both `docs/GUIDE.md` and `docs/GUIDE.es.md` (the README only when it changes what prama is or checks), and add an entry to `CHANGELOG.md`.
 
 ## License
 
@@ -60,7 +60,7 @@ una prueba de regresión. El CI corre la suite en Ubuntu 22.04, Debian 12 y Ubun
 verde en todas. Si encuentras un fallo usando prama con agentes, `prama-agent feedback export <id>` te da
 el cuerpo del issue listo para la plantilla. Lee los
 principios de diseño de arriba y las invariantes de seguridad en
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Documenta los cambios en `README.md` y `README.es.md`.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Documenta los cambios en `docs/GUIDE.md` y `docs/GUIDE.es.md` (el README solo si cambia qué es o qué verifica prama).
 Los textos para el usuario se escriben en inglés con `_t` / `_tv` y su traducción va en
 `lib/lang/es/<módulo>.sh` (Python: `_("…")` y `lib/lang/es/telegram_bot.json`); `make lint` revisa
 que no falte ninguna.

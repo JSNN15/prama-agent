@@ -821,7 +821,8 @@ class Bot:
         heads = {"doing": _("In progress"), "review": _("Review"), "blocked": _("Blocked"),
                  "todo": _("To do"), "done": _("Done")}
         flagtxt = {"stale": _("⚠️ no activity"), "unverified": _("❓ no evidence"), "orphan": _("✝ owner gone"),
-                   "ready": _("🟢 ready")}
+                   "ready": _("🟢 ready"), "checked": _("✅ checked by prama"),
+                   "failed": _("❌ check failed")}
         for st in ("doing", "review", "blocked", "todo", "done"):
             group = [t for t in tasks if t.get("status") == st]
             if not group:

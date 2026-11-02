@@ -3,7 +3,7 @@
 # and user paths otherwise (~/.local, ~/.config/prama-agent).
 SHELL_FILES := bin/prama-agent bin/prama-agy bin/prama-claude lib/*.sh lib/lang/*/*.sh install.sh tests/*.sh .github/scripts/*.sh tools/*.sh
 
-.PHONY: all install uninstall test test-matrix lint i18n screenshots
+.PHONY: all install uninstall test test-matrix lint i18n screenshots demo
 
 all: lint test
 
@@ -12,12 +12,16 @@ lint:
 	@if command -v shellcheck >/dev/null 2>&1; then \
 	  shellcheck -S warning -x $(SHELL_FILES) && echo "shellcheck: OK"; \
 	else echo "shellcheck no instalado: solo se verificó la sintaxis"; fi
-	@python3 -m py_compile lib/telegram_bot.py tests/test_telegram_bot.py tools/i18n_check.py tools/ansi2html.py && echo "py_compile: OK"
+	@python3 -m py_compile lib/telegram_bot.py tests/test_telegram_bot.py tools/i18n_check.py tools/ansi2html.py tools/demo_gif.py && echo "py_compile: OK"
 	@python3 tools/i18n_check.py
 
 # README screenshots (docs/img) from a demo fleet; needs chromium
 screenshots:
 	bash tools/screenshots.sh all
+
+# The README demo (docs/img/demo-*.gif), from the same demo fleet; needs chromium and python3-pil
+demo:
+	bash tools/demo.sh all
 
 # Translation coverage, listing catalog entries the code no longer uses literally.
 i18n:

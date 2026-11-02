@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-11-01
+
+### Added
+- **`plan verify <task>`** (and `plan done <task> --verify`): prama runs the task's acceptance check
+  (its `--accept` command) where the work is, the owner's worktree in an isolated team, and records the
+  exit code and the commit. A pass is evidence prama saw itself (**✓ checked by prama** on the board,
+  the menu, Telegram and the HTML export); a failure (**✖**) reopens a task that was marked done, is
+  kept in the plan's history and reaches Telegram. At a terminal the operator confirms the command
+  first (`--yes` skips). `PRAMA_VERIFY_TIMEOUT` (1800 s) bounds it.
+- Plan alerts (stale, unverified, overlap, owner gone, ready) now reach Telegram too, with the team's
+  buttons, not only the coordinator.
+- README demo: a 35-second GIF in each language, rebuilt by `make demo` from the same demo fleet as
+  the screenshots; every screen is real prama output.
+- `docs/GUIDE.md` / `docs/GUIDE.es.md`: the full user guide, moved out of the README.
+- `docs/adr/`: six architecture decision records (bash and tmux, the dedicated tmux server and
+  private state, health from hooks, a branch per agent, the append-only plan, i18n).
+- `docs/HOW-IT-WAS-BUILT.md` (and `.es.md`): how prama-agent was built with AI coding agents,
+  including the ones it orchestrated itself, and what broke on the way.
+
+### Changed
+- **README rewritten around one idea, "don't trust what your agents say; check it"**: what prama
+  checks, an honest comparison with Claude Squad, Agent of Empires, Gas Town and Claude Code agent
+  teams (sourced, dated 2026-11-01), why bash, install, and why the name. Under 11 KB.
+- Documentation wording tightened to match the code after an audit: hooks decide *blocked* (idle or
+  working is still read from the screen), roles are guard rails against mistakes rather than a
+  sandbox, process-group termination, watchdog alert routing and Telegram alert buttons.
+- The unverified alert and the "done without evidence" warning point to `plan verify`.
+
 ## [6.6.0] - 2026-11-01
 
 ### Added

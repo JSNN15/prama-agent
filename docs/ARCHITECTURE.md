@@ -80,6 +80,11 @@ creates private dirs).
 19. **The plan is append-only history plus a snapshot.** `tasks` is rewritten under `flock`, `log`
     only grows, revisions only increase; what an agent claims (status, progress) is shown next to what
     is observed (activity, evidence), never instead of it.
+20. **Checks are observations prama makes itself.** `plan verify` runs the task's `accept` command in the
+    owner's worktree (or the zone's checkout) and records `time:rc:commit` in `checked`; a failure
+    reopens a task marked done. This is the one place a command stored in state is executed: it was
+    written by the coordinator (same user), it is printed first, and an operator at a terminal
+    confirms it (`--yes` skips). Hand-written evidence stays a claim and is never promoted to *checked*.
 
 ## core.sh API
 

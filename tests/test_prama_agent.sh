@@ -570,7 +570,7 @@ js=$("$BIN" plan pl --team t json)
 assert_true "bus report --task moves it to review with the evidence" "jq -e '.tasks[0].status == \"review\" and (.tasks[0].evidence | test(\"14 tests\"))' >/dev/null <<< '$js'"
 PRAMA_SESSION=$CO "$BIN" plan start T2 --owner tp-pl-t-agy-2 >/dev/null 2>&1
 out=$(PRAMA_SESSION=$CO "$BIN" plan "done" T2 2>&1)
-assert_contains "done without evidence is flagged" "evidence" "$out"
+assert_contains "done without evidence is flagged" "SIN evidencia" "$out"
 assert_true "…as unverified" "$BIN plan pl --team t json | jq -e '.tasks[1].flags | test(\"unverified\")' >/dev/null"
 PRAMA_SESSION=$CO "$BIN" plan replan "scope changed" >/dev/null 2>&1
 assert_eq "replan bumps the revision" "2" "$("$BIN" plan pl --team t json | jq -r .rev)"
@@ -587,10 +587,27 @@ out=$(PRAMA_PLAN_STALE_MIN=0 bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source
 assert_contains "Watchdog: stale tasks" "sin actividad" "$out"
 assert_contains "…same files in progress" "mismos archivos" "$out"
 assert_contains "…done without evidence" "sin evidencia" "$out"
+out=$(PRAMA_PLAN_STALE_MIN=0 bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; source "'"$REPO_DIR"'/lib/swarm.sh"; source "'"$REPO_DIR"'/lib/plan.sh"; source "'"$REPO_DIR"'/lib/health.sh"; prama_init >/dev/null
+  _plan_target tp-pl-t-coord "" && rm -f "$PL_DIR/.alerted"
+  deliver_to_session() { :; }; telegram_notify() { printf "TG[%s|%s] %s\n" "$2" "$3" "$1"; }
+  _watch_plans')
+assert_contains "Plan alerts also reach Telegram, with the team's buttons" "TG[team|tp-pl-t-coord] 📋 pl · t" "$out"
 "$BIN" cockpit pl --team t --no-attach >/dev/null 2>&1
 assert_true "The cockpit shows the plan live" "$P list-panes -a -F '#{pane_title}' | grep -q 'PLAN'"
 "$BIN" swarm stop pl --team t >/dev/null 2>&1
 assert_true "The plan outlives the team" "$BIN plan pl --team t json | jq -e '.tasks | length == 3' >/dev/null"
+"$BIN" plan pl --team t add "Checked" --accept "echo '14 passed'" >/dev/null 2>&1
+out=$("$BIN" plan pl --team t verify T4 --done --yes 2>&1)
+assert_contains "plan verify runs the task's acceptance check" "pasó" "$out"
+assert_eq "…a pass is recorded as evidence prama saw itself" "done checked" \
+  "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T4") | .status + " " + .flags')"
+"$BIN" plan pl --team t add "Broken" --accept "echo '1 failed'; exit 3" >/dev/null 2>&1
+"$BIN" plan pl --team t "done" T5 --evidence "all good, trust me" >/dev/null 2>&1
+rc=0; out=$("$BIN" plan pl --team t verify T5 --yes 2>&1) || rc=$?
+assert_true "…a failing check fails the command" "[ $rc -ne 0 ] && grep -q 'falló' <<< \"\$out\""
+assert_eq "…and a task called done that fails it is reopened" "doing failed" \
+  "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T5") | .status + " " + .flags')"
+assert_true "…both checks are in the history" "$BIN plan pl --team t log | grep -q 'rc=3'"
 "$BIN" zones remove pl >/dev/null 2>&1
 
 section "Feedback channel (agents report prama bugs)"

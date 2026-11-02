@@ -397,6 +397,8 @@ _watch_plans() {
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       deliver_to_session "$c" "$line" || true
+      declare -F telegram_notify >/dev/null && telegram_notify "📋 $(team_label "$c")
+${line#\[PRAMA\] }" team "$c"
       _watch_log "$c: $line"
     done < <( plan_alerts "$c" 2>/dev/null )
   done < <(prama_sessions)
