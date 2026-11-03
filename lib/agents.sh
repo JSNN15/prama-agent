@@ -526,7 +526,14 @@ launch_agent() {
   if [ "$agent" = claude ] && [ "$role" != daemon ]; then
     sid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || true)
   fi
-  AGENT_SID=$sid AGENT_RESUME=0 PROFILE=$profile \
+  # `restore`: the same conversation. claude only has one to resume once it got a message; before
+  # that it starts fresh with the same id.
+  local resume=0
+  if [ -n "${RESTORE_SID:-}" ]; then
+    sid=$RESTORE_SID
+    if [ "$agent" != claude ] || claude_conversation_exists "$sid"; then resume=1; fi
+  fi
+  AGENT_SID=$sid AGENT_RESUME=$resume PROFILE=$profile \
     build_agent_command "$agent" "$perm" "$remote" "$name" "$role_prompt" ${PASS[@]+"${PASS[@]}"}
 
   # Only non-secret env goes on the tmux command line; provider tokens are applied by the
@@ -548,6 +555,9 @@ launch_agent() {
   fi
   tmx new-session -d -s "$name" -x "${COLS:-120}" -y 40 -c "$target_d" "${tmux_env[@]}" "${runner_s% }" \
     || { warn "$(_t "tmux could not create session '%s'." "$name")"; return 1; }
+  # A new life for this name: what was saved about the previous one no longer applies.
+  local saved; saved=$(closed_dir "$name")
+  rm -f "$saved/meta" "$saved/meta.lock" "$saved/spec.env" "$saved/spec.env.lock" "$saved/args" "$saved/brief"
   state_write "$name" ROLE="$role" AGENT="$agent" ZONE="$zone" PROFILE="$profile" PERM="$perm" ${team:+TEAM="$team"} \
     REMOTE="$remote" MODEL="$AGENT_MODEL" EFFORT="$AGENT_EFFORT" PRESET="$PRESET" WORKTREE="$wt" \
     SESSION_ID="$sid" PARENT="$parent" TARGET_DIR="$target_d" STARTED_AT="$(date -Iseconds)"
@@ -555,6 +565,7 @@ launch_agent() {
   # to the next agent with this name.
   rm -f "$(state_args_file "$name")"
   if (( ${#PASS[@]} )); then printf '%s\0' "${PASS[@]}" > "$(state_args_file "$name")"; fi
+  session_archive "$name"
   bus_event started "${PRAMA_SESSION:-operator}" "$name" "$agent@$zone ($role, $perm${AGENT_MODEL:+, $AGENT_MODEL}${PRESET:+, preset $PRESET})"
   watchdog_ensure || true
   # An assistant is for the operator: tell them it is there (status bar, a message, Telegram).

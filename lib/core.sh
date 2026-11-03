@@ -248,6 +248,7 @@ tmx_has()  { tmx has-session -t "=$1" 2>/dev/null; }
 tmx_kill() {
   local s=$1 pid pgids=() g i alive
   tmx_has "$s" || return 1
+  session_archive "$s" closed   # deliberate: first, so nothing reads it as a session that vanished
   while IFS= read -r pid; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
     g=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
@@ -668,9 +669,11 @@ state_get() {
   printf '%s' "${3:-}"
 }
 
+# state_remove <session> [reason] — keeps a copy for `restore` first (see session_archive).
 state_remove() {
   local f
   f=$(state_file "$1")
+  session_archive "$1" "${2:-}"
   rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md,brief} "$f.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock" 2>/dev/null || true
 }
 
@@ -756,8 +759,58 @@ state_gc() {
   for f in "$PRAMA_BUS_DIR"/state/*.env; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .env)
-    tmx_has "$s" || rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md,brief} "$f.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock"
+    tmx_has "$s" || state_remove "$s"
   done
+}
+
+# ── Closed sessions: what `prama-agent restore` brings back ─────────────────
+# closed/<session>/ holds a copy of the session's spec (spec.env, args, brief) and, once it ended, meta:
+# CLOSED=closed (someone closed it through prama) | exited (its supervisor finished) | vanished (it
+# just ended), and when. Data like the state: never sourced, private, no secrets.
+closed_dir() { printf '%s/closed/%s' "$PRAMA_BUS_DIR" "$(slugify "$1")"; }
+
+# session_archive <session> [reason] — refreshes the copy while the state exists; the first reason
+# recorded wins. The conversation id reported by the hooks outlives the health file (a restart wipes it).
+session_archive() {
+  local s=$1 reason=${2:-} f d sid a
+  is_internal_session "$s" && return 0
+  f=$(state_file "$s") d=$(closed_dir "$s")
+  if [ -f "$f" ]; then
+    ( umask 077; mkdir -p "$d" ) || return 0
+    sid=$(health_get "$s" AGENT_SID "$(_kv_get "$d/spec.env" AGENT_SID)")
+    cp -f "$f" "$d/spec.env.tmp.$$" && mv -f "$d/spec.env.tmp.$$" "$d/spec.env" || return 0
+    for a in args brief; do
+      if [ -f "${f%.env}.$a" ]; then cp -f "${f%.env}.$a" "$d/$a"; else rm -f "$d/$a"; fi
+    done
+    [ -z "$sid" ] || _kv_merge "$d/spec.env" "$s" "AGENT_SID=$sid"
+  fi
+  if [ -n "$reason" ] && [ -f "$d/spec.env" ] && [ -z "$(_kv_get "$d/meta" CLOSED)" ]; then
+    _kv_merge "$d/meta" "$s" "CLOSED=$reason" "CLOSED_TS=${EPOCHSECONDS:-$(date +%s)}"
+  fi
+  return 0
+}
+
+# closed_rows → "epoch|session|reason" of the saved sessions not running now, newest first. No
+# reason yet means nothing recorded how it ended (a reboot, a killed server): it vanished.
+closed_rows() {
+  local d s ts
+  for d in "$PRAMA_BUS_DIR"/closed/*/; do
+    [ -f "${d}spec.env" ] || continue
+    s=${d%/}; s=${s##*/}
+    tmx_has "$s" && continue
+    ts=$(_kv_get "${d}meta" CLOSED_TS)
+    [ -n "$ts" ] || ts=$(stat -c %Y "${d}spec.env" 2>/dev/null || printf 0)
+    printf '%s|%s|%s\n' "$ts" "$s" "$(_kv_get "${d}meta" CLOSED vanished)"
+  done | sort -t'|' -k1,1nr
+}
+
+# Keeps the newest PRAMA_CLOSED_KEEP (30) saved sessions; a running one is never dropped.
+closed_prune() {
+  local limit=${PRAMA_CLOSED_KEEP:-30} s
+  [[ "$limit" =~ ^[0-9]+$ ]] || limit=30
+  while IFS='|' read -r _ s _; do
+    [ -n "$s" ] && valid_session_name "$s" && rm -rf -- "$(closed_dir "$s")"
+  done < <(closed_rows | tail -n +$(( limit + 1 )))
 }
 
 # ── Task queues (maildir-style: one file per task, atomic rename to claim) ──
@@ -872,6 +925,7 @@ snapshot_procs() {
 # Finds the agent process under a pane (breadth-first over descendants).
 resolve_pane_agent_pid() {
   local pane_pid=$1 queue p c depth=0
+  [[ "$pane_pid" =~ ^[0-9]+$ ]] || return 0   # the session ended in the meantime
   snapshot_procs
   queue=("$pane_pid")
   while (( ${#queue[@]} )) && (( depth < 4 )); do
@@ -1015,7 +1069,7 @@ session_has_agent_process() {
   ppid=$(tmx display-message -p -t "=$1:" '#{pane_pid}' 2>/dev/null) || return 1
   snapshot_procs   # populate the cache in this shell; the $(...) below runs in a subshell
   apid=$(resolve_pane_agent_pid "$ppid")
-  [[ "${PS_COMM[$apid]:-}" =~ $AGENT_COMM_RE ]]
+  [ -n "$apid" ] && [[ "${PS_COMM[$apid]:-}" =~ $AGENT_COMM_RE ]]
 }
 
 # Agent processes running outside the prama tmux server (no SSH-drop protection).

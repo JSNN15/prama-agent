@@ -265,6 +265,7 @@ Fleet management (you manage your agents; everything returns JSON with --json):
 - Edit the configuration (model, effort, preset, permissions):  prama-agent fleet edit <session> [--model M] [--effort E] [--preset P]
 - Restart an agent (e.g. after an error):                prama-agent fleet restart <session>
 - Close an agent you no longer need:                     prama-agent fleet kill <session>
+- Bring back one of your agents that ended, with its conversation: prama-agent restore <session>
 $models_help
 Keep the team memory current: record each decision, the plan and who does what with
 'prama-agent memory add', so a restarted coordinator or a new agent can pick up the work.
@@ -397,6 +398,7 @@ Gestión de la flota (tú administras a tus agentes; todo devuelve JSON con --js
 - Editar configuración (modelo, esfuerzo, preset, permisos):  prama-agent fleet edit <sesión> [--model M] [--effort E] [--preset P]
 - Reiniciar un agente (p. ej. tras un error):                prama-agent fleet restart <sesión>
 - Cerrar un agente que ya no necesitas:                      prama-agent fleet kill <sesión>
+- Traer de vuelta a un agente tuyo que terminó, con su conversación: prama-agent restore <sesión>
 $models_help
 Mantén al día la memoria del equipo: registra cada decisión, el plan y quién hace qué con
 'prama-agent memory add', para que un coordinador reiniciado o un agente nuevo retome el trabajo.
@@ -524,12 +526,16 @@ _runner_title() { tmx select-pane -t "=$1:" -T "$2" 2>/dev/null || true; }
 
 # The session's state goes with its runner, but only while this runner still owns the pane: a
 # runner replaced in the same pane (respawn) must not wipe the state of the one that follows.
+# _runner_cleanup [how] — exited (its work ended), closed (the operator chose it) or signal: killed
+# from outside, which says nothing about why, so no reason is recorded and the watchdog reports it.
 _runner_cleanup() {
   [ -n "${_RUNNER_SESSION:-}" ] || return 0
-  local pp
-  pp=$(tmx display-message -p -t "=$_RUNNER_SESSION:" '#{pane_pid}' 2>/dev/null) || pp=''
+  local pp s=$_RUNNER_SESSION how=${1:-exited}
+  _RUNNER_SESSION=''   # once: the EXIT trap follows the others
+  pp=$(tmx display-message -p -t "=$s:" '#{pane_pid}' 2>/dev/null) || pp=''
   [ -z "$pp" ] || [ "$pp" = "$$" ] || [ "$pp" = "$PPID" ] || return 0
-  state_remove "$_RUNNER_SESSION"
+  [ "$how" = signal ] && how=''
+  state_remove "$s" "$how"
 }
 
 # Shows an error inside the pane and waits for a key so the message is not lost when the pane closes.
@@ -678,7 +684,7 @@ internal_runner() {
 
   _RUNNER_SESSION=$session_name
   trap '_runner_cleanup' EXIT
-  trap '_runner_cleanup; exit 130' INT TERM HUP
+  trap '_runner_cleanup signal; exit 130' INT TERM HUP
 
   type restore_locale >/dev/null 2>&1 && restore_locale
   cd "$target_dir" 2>/dev/null || _runner_fatal "$(_t 'The working directory does not exist: %s' "$target_dir")"
@@ -776,7 +782,7 @@ internal_runner() {
       printf ' %s %sPRAMA_STANDBY%s' "$(_t '⌘ Action [r/s/m/q]:')" "$C_DIM" "$C_OFF"
       printf '\e[%dD' 13   # park the cursor before the (dim) marker
       local act=''
-      IFS= read -r -n1 act || { _runner_cleanup; exit 0; }
+      IFS= read -r -n1 act || { _runner_cleanup signal; exit 0; }   # its terminal is gone
       printf '\n'
       case "$act" in
         ''|r|R)
@@ -794,7 +800,8 @@ internal_runner() {
           show_menu=1
           ;;
         q|Q)
-          _runner_cleanup
+          bus_event stopped operator "$session_name" "closed from its menu"
+          _runner_cleanup closed
           exit 0
           ;;
       esac

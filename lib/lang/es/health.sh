@@ -21,4 +21,7 @@ I18N+=(
   ['Fleet watchdog running (every %ss). Ctrl+C to stop it.']='Watchdog de la flota activo (cada %ss). Ctrl+C para detenerlo.'
   ['No agents left; watchdog finished.']='Sin agentes; watchdog finalizado.'
   ['→ %s: unsent message submitted']='→ %s: mensaje sin enviar, enviado'
+  ['■ %s ended and nobody closed it through prama']='■ %s terminó y nadie la cerró desde prama'
+  ['[PRAMA ALERT] '\''%s'\'' ended and nobody closed it through prama. Bring it back with its conversation: prama-agent restore %s']='[ALERTA PRAMA] '\''%s'\'' terminó y nadie la cerró desde prama. Tráela de vuelta con su conversación: prama-agent restore %s'
+  ['[PRAMA ALERT] These sessions ended and nobody closed them through prama: %s. Bring them back with their conversations: prama-agent restore --all']='[ALERTA PRAMA] Estas sesiones terminaron y nadie las cerró desde prama: %s. Tráelas de vuelta con sus conversaciones: prama-agent restore --all'
 )
