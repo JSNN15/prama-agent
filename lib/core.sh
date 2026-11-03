@@ -302,12 +302,13 @@ tmx_capture() {
 }
 
 # session_human_active <session> <since epoch> → 0 when a client attached to the session (directly
-# or as a cockpit viewer) has had keyboard or mouse activity since <since>: someone is at it.
+# or as a cockpit viewer) has had keyboard or mouse activity since <since>: someone is at it. A
+# client's activity starts at its creation time (attaching is not typing; resizes do not count).
 session_human_active() {
-  local a since=${2:-0}
-  while IFS= read -r a; do
-    [[ "$a" =~ ^[0-9]+$ ]] && (( a >= since )) && return 0
-  done < <(tmx list-clients -t "=$1" -F '#{client_activity}' 2>/dev/null)
+  local a c since=${2:-0}
+  while IFS=' ' read -r a c; do
+    [[ "$a" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ ]] && (( a > c && a >= since )) && return 0
+  done < <(tmx list-clients -t "=$1" -F '#{client_activity} #{client_created}' 2>/dev/null)
   return 1
 }
 
