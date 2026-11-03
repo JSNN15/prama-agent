@@ -409,6 +409,7 @@ state_color() {
     WORKING) UI_S="$C_LIVE$C_BOLD" ;;
     READY)   UI_S=$C_LIVE ;;
     STANDBY) UI_S=$C_BRASS ;;
+    WAITING) UI_S=$C_BRASS$C_BOLD ;;
     DAEMON)  UI_S=$C_PURP ;;
     BOT|SHELL) UI_S=$C_NEON ;;
     DEAD|BLOCKED) UI_S=$C_ERR$C_BOLD ;;

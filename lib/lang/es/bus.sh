@@ -26,7 +26,6 @@ I18N+=(
   ["Task queued for daemon '%s' (%d pending)."]='Tarea encolada para el daemon '\''%s'\'' (%d pendiente(s)).'
   ['📥 [BUS] %s → %s (queue): %s']='📥 [BUS] %s → %s (cola): %s'
   ['[TASK FROM %s]: %s']='[TAREA DE %s]: %s'
-  ["Task delivered live to '%s'."]='Tarea entregada en vivo a '\''%s'\''.'
   ["'%s' is not ready to receive text (%s); task saved in its queue."]=''\''%s'\'' no está listo para recibir texto (%s); tarea guardada en su cola.'
   ['Usage: prama-agent bus report "<result summary>"']='Uso: prama-agent bus report "<resumen del resultado>"'
   ['[REPORT FROM %s]: %s']='[REPORTE DE %s]: %s'
@@ -52,4 +51,8 @@ I18N+=(
   ['Bus event log and queues cleared.']='Registro de eventos y colas del bus vaciados.'
   ['No live '\''%s'\'' you can reach (your team, or your zone outside teams).']='No hay un '\''%s'\'' vivo a tu alcance (tu equipo, o tu zona fuera de los equipos).'
   ['The operator is talking to '\''%s'\''; the task waits in its queue and is delivered afterwards.']='El operador está hablando con '\''%s'\''; la tarea espera en su cola y se entrega después.'
+  ['Task typed into '\''%s'\''.']='Tarea escrita en '\''%s'\''.'
+  ['Task received by '\''%s'\'' (its CLI confirmed it).']=''\''%s'\'' recibió la tarea (su CLI lo confirmó).'
+  ['Task typed into '\''%s'\'', but it has no hooks to confirm it.']='Tarea escrita en '\''%s'\'', pero no tiene hooks para confirmarlo.'
+  ['Task typed into '\''%s'\'', not confirmed within %ss: it may be busy, or the text may be sitting in its prompt.']='Tarea escrita en '\''%s'\'', sin confirmar en %ss: puede estar ocupado, o el texto puede haber quedado en su prompt.'
 )

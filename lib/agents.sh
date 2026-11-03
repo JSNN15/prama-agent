@@ -89,6 +89,10 @@ build_agent_command() {
         claude|agy) CMD+=(--dangerously-skip-permissions) ;;
         opencode)   CMD+=(--auto) ;;
       esac ;;
+    ask|safe)
+      # Without the flag claude takes the account's default, which can be "auto mode": ask would
+      # not ask. Named here so the label is true. (agy: no flag selects "ask"; its default applies.)
+      if [ "$agent" = claude ] && ! _pass_has "--permission-mode" "$@"; then CMD+=(--permission-mode default); fi ;;
     plan|readonly)
       case "$agent" in
         claude) CMD+=(--permission-mode plan) ;;

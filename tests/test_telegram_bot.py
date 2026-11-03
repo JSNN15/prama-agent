@@ -104,6 +104,10 @@ def make_bot(fleet=None):
 
 
 class Helpers(unittest.TestCase):
+    def test_waiting_needs_the_operator(self):
+        self.assertEqual(tb.dot({"state": "WAITING"}), "🟡")
+        self.assertTrue(tb.needs_attention({"state": "WAITING"}))
+
     def test_quota_text(self):
         self.assertEqual(tb.quota_text({"five_hour_pct": 12, "seven_day_pct": 40, "context_pct": None}),
                          "5h 12% · 7d 40%")

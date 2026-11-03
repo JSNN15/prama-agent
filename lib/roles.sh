@@ -190,6 +190,7 @@ _role_prompt_en() {
 Multi-agent bus commands (run them with your Bash tool):
 - See live agents, roles, queues and latest events:  prama-agent bus status
 - Assign a task to an exact session or to a role:    prama-agent bus assign <session|coordinator|executor|reader|daemon> "<instruction>"
+  (--wait [seconds] when the next step depends on it: exit code 3 means typed or queued, not confirmed received)
 - Report a result to the coordinator:                prama-agent bus report "<summary>"
 - See the pending tasks in your queue:               prama-agent bus inbox $session_name
 - Read another agent's terminal:                     prama-agent logs <session> 80
@@ -323,6 +324,7 @@ _role_prompt_es() {
 Comandos del bus multi-agente (ejecútalos con tu herramienta Bash):
 - Ver agentes vivos, roles, colas y últimos eventos: prama-agent bus status
 - Asignar una tarea a una sesión exacta o a un rol:  prama-agent bus assign <sesión|coordinator|executor|reader|daemon> "<instrucción>"
+  (--wait [segundos] si el siguiente paso depende de eso: el código de salida 3 significa escrita o en cola, sin confirmar que la recibió)
 - Reportar un resultado al coordinador:              prama-agent bus report "<resumen>"
 - Ver tareas pendientes en tu cola:                  prama-agent bus inbox $session_name
 - Leer la terminal de otro agente:                   prama-agent logs <sesión> 80

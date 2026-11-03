@@ -24,4 +24,6 @@ I18N+=(
   ['■ %s ended and nobody closed it through prama']='■ %s terminó y nadie la cerró desde prama'
   ['[PRAMA ALERT] '\''%s'\'' ended and nobody closed it through prama. Bring it back with its conversation: prama-agent restore %s']='[ALERTA PRAMA] '\''%s'\'' terminó y nadie la cerró desde prama. Tráela de vuelta con su conversación: prama-agent restore %s'
   ['[PRAMA ALERT] These sessions ended and nobody closed them through prama: %s. Bring them back with their conversations: prama-agent restore --all']='[ALERTA PRAMA] Estas sesiones terminaron y nadie las cerró desde prama: %s. Tráelas de vuelta con sus conversaciones: prama-agent restore --all'
+  ['? %s waits for an answer on its screen']='? %s espera una respuesta en su pantalla'
+  ['[PRAMA ALERT] '\''%s'\'' is waiting for an answer on its screen (a permission or a question), and only a person can give it: prama-agent attach %s']='[ALERTA PRAMA] '\''%s'\'' espera una respuesta en su pantalla (un permiso o una pregunta), y solo una persona puede darla: prama-agent attach %s'
 )

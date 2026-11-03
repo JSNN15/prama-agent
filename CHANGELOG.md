@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.12.0] - 2026-11-04
+
+### Security
+- **A bus message could approve a permission dialog.** Reproduced with real Claude Code: prama read the
+  dialog as "working" (it shows `Esc to cancel`), pasted the message and pressed Enter, and Enter on that
+  dialog means *Yes*: the command ran and the message was lost. A session showing a dialog is now `WAITING`:
+  nothing is typed into it, queued messages wait, an agent can never answer it, and `prama-agent send` (also
+  Telegram's Talk) refuses unless the operator adds `--force`. If it stays open `PRAMA_WAIT_ALERT` seconds
+  (120) the operator is told once.
+- **`--ask` did not ask.** With no flag Claude Code takes the account's default mode, which can be auto mode:
+  prama showed "confirm each action" while nothing was confirmed. `ask` now passes
+  `--permission-mode default`. Agents launched with `--ask` will start prompting.
+- A server started from inside a Claude Code session passed that session's identity to every pane, tokens
+  included; `claude` then refused to start. The generated tmux.conf unsets them.
+
+### Added
+- **`bus assign --wait [seconds]`**: returns once the CLI's own hook saw the prompt submitted; exit code 3
+  when it was only typed or queued. Plain `assign` now says it *typed* the task, not that it was delivered.
+
+### Fixed
+- "Working" was read from the words anywhere on the screen: an agent writing "Working directory…" looked busy
+  and its queue stalled, while agy's real footer (`esc to cancel`, lowercase) and Braille spinner were missed.
+  It now follows each CLI's own footer and spinner line, with rules from Herdr's manifests (Apache-2.0) and
+  tests on real captured screens. agy's rules were not checked against a live agy (its quota was exhausted).
+- Two messages sent to one session at the same time could merge: sending now takes a lock per session.
+
 ## [6.11.0] - 2026-11-03
 
 ### Added

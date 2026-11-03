@@ -59,7 +59,6 @@ I18N+=(
   ["Session '%s' closed."]='Sesión '\''%s'\'' cerrada.'
   ['N must be a number.']='N debe ser un número.'
   ['last %s lines']='últimas %s líneas'
-  ['Usage: prama-agent send <session> "<text>"']='Uso: prama-agent send <sesión> "<texto>"'
   ["Sent to '%s'."]='Enviado a '\''%s'\''.'
 
   # worktree
@@ -161,4 +160,7 @@ I18N+=(
   ['--brief requires a text (what the assistant helps the operator with)']='--brief requiere un texto (con qué ayuda el asistente al operador)'
   [''\''%s'\'' is the operator'\''s assistant: what they type there is private (PRAMA_ASSIST_PRIVATE=0 lets agents read it).']=''\''%s'\'' es el asistente del operador: lo que escribe ahí es privado (PRAMA_ASSIST_PRIVATE=0 deja que los agentes lo lean).'
   ['%d session(s) ended by themselves: prama-agent restore']='%d sesión(es) terminaron solas: prama-agent restore'
+  [''\''%s'\'' is waiting for an answer on its screen, and only a person can give it.']=''\''%s'\'' espera una respuesta en su pantalla, y solo una persona puede darla.'
+  [''\''%s'\'' is waiting for an answer on its screen: this text would answer it. Look first: prama-agent attach %s (send --force to type anyway).']=''\''%s'\'' espera una respuesta en su pantalla: este texto la respondería. Mira primero: prama-agent attach %s (send --force para escribir de todos modos).'
+  ['Usage: prama-agent send <session> [--force] "<text>"']='Uso: prama-agent send <sesión> [--force] "<texto>"'
 )

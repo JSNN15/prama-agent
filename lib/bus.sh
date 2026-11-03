@@ -6,7 +6,7 @@
 # Public API:
 #   subcmd_bus <status|assign|report|broadcast|inbox|watch|clear|swarm-start|help> [args...]
 #   resolve_bus_target <target>   → sets BUS_TARGET BUS_TARGET_KIND(session|role|none) BUS_TARGET_NOTE
-#   bus_session_state <session>   → prints DEAD|BOT|STANDBY|DAEMON|WORKING|SHELL|READY
+#   bus_session_state <session>   → prints DEAD|BOT|STANDBY|DAEMON|BLOCKED|WAITING|WORKING|SHELL|READY
 #   bus_can_inject <session>      → 0 if it is safe to type into the session
 #   sync_bus_state                → compat shim (state is written by the runner; this only GCs)
 #
@@ -359,10 +359,13 @@ _bus_status() {
 
 # _bus_task_arg <args…> → BUS_TASK (value of --task / -T, a plan task id) and BUS_ARGS (the rest)
 _bus_task_arg() {
-  BUS_TASK='' BUS_ARGS=()
+  BUS_TASK='' BUS_ARGS=() BUS_WAIT=0
   while (( $# )); do
     case $1 in
       --task|--plan) BUS_TASK=${2:-}; shift 2 || shift ;;
+      --wait)        BUS_WAIT=30; shift
+                     if [[ "${1:-}" =~ ^[0-9]+$ ]]; then BUS_WAIT=$1; shift; fi ;;
+      --wait=*)      BUS_WAIT=${1#--wait=}; [[ "$BUS_WAIT" =~ ^[0-9]+$ ]] || BUS_WAIT=30; shift ;;
       *) BUS_ARGS+=("$1"); shift ;;
     esac
   done
@@ -419,10 +422,27 @@ _bus_assign() {
     return 0
   fi
 
+  local t0=${EPOCHSECONDS:-$(date +%s)}
   if bus_can_inject "$dest" && tmx_send "$dest" "$qmsg"; then
     bus_event assign "$sender" "$dest" "$msg"
-    ok "$(_t "Task delivered live to '%s'." "$dest")"
     _bus_notify "📨 [BUS] $sender → $dest: $msg"
+    if (( BUS_WAIT == 0 )); then
+      ok "$(_t "Task typed into '%s'." "$dest")"
+      return 0
+    fi
+    # Proof, not hope: the CLI's own hook fires when the prompt is really submitted. Nothing is sent
+    # again on a timeout: it does not prove the message was lost (a busy agent takes it after its turn).
+    if _bus_wait_submitted "$dest" "$t0" "$BUS_WAIT"; then
+      bus_event confirmed "$sender" "$dest" "$msg"
+      ok "$(_t "Task received by '%s' (its CLI confirmed it)." "$dest")"
+      return 0
+    fi
+    if [ -z "$(health_get "$dest" HEALTH)" ]; then
+      warn "$(_t "Task typed into '%s', but it has no hooks to confirm it." "$dest")"
+    else
+      warn "$(_t "Task typed into '%s', not confirmed within %ss: it may be busy, or the text may be sitting in its prompt." "$dest" "$BUS_WAIT")"
+    fi
+    return 3
   else
     queue_push "$dest" "$qmsg"
     bus_event queued "$sender" "$dest" "$msg"
@@ -431,7 +451,19 @@ _bus_assign() {
     else
       warn "$(_t "'%s' is not ready to receive text (%s); task saved in its queue." "$dest" "$(bus_session_state "$dest")")"
     fi
+    (( BUS_WAIT == 0 )) || return 3
   fi
+}
+
+# _bus_wait_submitted <session> <since epoch> <seconds> → 0 once a prompt was submitted since then.
+_bus_wait_submitted() {
+  local i ts
+  for (( i = 0; i < $3 * 2; i++ )); do
+    ts=$(health_get "$1" PROMPT_TS 0)
+    [[ "$ts" =~ ^[0-9]+$ ]] && (( ts >= $2 )) && return 0
+    sleep 0.5
+  done
+  return 1
 }
 
 _bus_report() {
@@ -489,7 +521,7 @@ _bus_broadcast() {
     case "$st" in
       READY|WORKING)
         if tmx_send "$s" "$line"; then (( sent++ )); else queue_push "$s" "$line"; (( queued++ )); fi ;;
-      BLOCKED) queue_push "$s" "$line"; (( queued++ )) ;;   # delivered when it recovers
+      BLOCKED|WAITING) queue_push "$s" "$line"; (( queued++ )) ;;   # delivered when it can be typed
       *) skipped+=("$s:$st") ;;
     esac
   done < <(prama_sessions)

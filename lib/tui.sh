@@ -319,6 +319,7 @@ _tui_state_label() {
     WORKING) _tv UI_S 'working' ;;
     READY)   _tv UI_S 'ready' ;;
     STANDBY) _tv UI_S 'waiting' ;;
+    WAITING) _tv UI_S 'needs you' ;;
     DAEMON)  _tv UI_S 'daemon' ;;
     SHELL)   _tv UI_S 'shell' ;;
     DEAD)    _tv UI_S 'down' ;;

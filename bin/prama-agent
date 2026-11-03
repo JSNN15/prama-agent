@@ -5,7 +5,7 @@
 
 set -u
 
-VERSION="6.11.0"
+VERSION="6.12.0"
 
 # Status line fast path: agy redraws it several times per second, so the last line is reused
 # for PRAMA_SL_MIN seconds with bash builtins only (no forks, before anything else runs).
@@ -487,13 +487,19 @@ subcmd_capture() {
 }
 
 subcmd_send() {
-  local target=${1:-}
+  local target=${1:-} force=0
   shift || true
+  if [ "${1:-}" = --force ]; then force=1; shift; fi
   local text="$*"
-  [ -n "$target" ] && [ -n "$text" ] || die "$(_t 'Usage: prama-agent send <session> "<text>"')"
+  [ -n "$target" ] && [ -n "$text" ] || die "$(_t 'Usage: prama-agent send <session> [--force] "<text>"')"
   require_session "$target"
   # Agents type into other agents only within their guard rails (the bus is their channel).
   [ -n "${PRAMA_SESSION:-}" ] && _fleet_authorize "$target" send
+  # Text plus Enter on a dialog answers it: in Claude Code, a permission dialog takes that as "Yes".
+  if [ "$(bus_session_state "$target")" = WAITING ]; then
+    [ -z "${PRAMA_SESSION:-}" ] || die "$(_t "'%s' is waiting for an answer on its screen, and only a person can give it." "$target")"
+    (( force )) || die "$(_t "'%s' is waiting for an answer on its screen: this text would answer it. Look first: prama-agent attach %s (send --force to type anyway)." "$target" "$target")"
+  fi
   tmx_send "$target" "$text" && ok "$(_t "Sent to '%s'." "$target")"
 }
 
