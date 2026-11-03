@@ -290,14 +290,15 @@ tmx_unsent_paste() {
 
 # Prints the last N lines of a session's active pane (ansi=1 keeps colors). "-S -N" alone would
 # return N lines of history PLUS the whole visible screen (stale text drives the state detection):
-# the capture is cut to the last N lines that are not the blank area below the cursor.
+# the capture is cut to the last N lines that are not the blank area below the cursor (trailing
+# blanks dropped: tmux 3.2 keeps them on joined lines).
 tmx_capture() {
   local s=$1 lines=${2:-40} ansi=${3:-0}
   local flags=(-p -J)
   (( ansi )) && flags+=(-e)
   [[ "$lines" =~ ^[0-9]+$ ]] || lines=40
   tmx capture-pane "${flags[@]}" -t "=$s:" -S "-$lines" 2>/dev/null \
-    | awk -v n="$lines" '{ l[NR] = $0 } /[^[:space:]]/ { last = NR }
+    | awk -v n="$lines" '{ sub(/[ \t]+$/, ""); l[NR] = $0 } /[^[:space:]]/ { last = NR }
         END { if (!last) exit; s = last - n + 1; if (s < 1) s = 1; for (i = s; i <= last; i++) print l[i] }'
 }
 
