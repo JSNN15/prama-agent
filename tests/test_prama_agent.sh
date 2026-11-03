@@ -1008,14 +1008,15 @@ assert_contains "…and who gave it" "tp-aco te dejó este encargo" "$out"
 assert_eq "The status bar calls the operator to it" "tp-guia" "$($P show-options -gqv @prama_assist)"
 assert_true "…and it is on the bus" "jq -e 'select(.event==\"assistant\" and .to==\"tp-guia\")' '$STATE/bus/events.jsonl' >/dev/null"
 cl=$($P list-clients -t '=tp-aco' -F '#{client_name}' | head -n 1)
-assert_contains "★ <name> shows in the operator's status bar" "★ tp-guia" "$($P display-message -p -c "$cl" -t '=tp-aco:' "$($P show-options -gqv status-left)")"
+# (display-message -p takes no -c on tmux 3.2: the format is rendered for the session)
+assert_contains "★ <name> shows in the operator's status bar" "★ tp-guia" "$($P display-message -p -t '=tp-aco:' "$($P show-options -gqv status-left)")"
 printf '#!/usr/bin/env bash\ncat > "%s/rows"; exit 1\n' "$TMP_ROOT" > "$TMP_ROOT/bin/fzf"; chmod +x "$TMP_ROOT/bin/fzf"
 "$BIN" --internal-nav pick "$cl" >/dev/null 2>&1
 rm -f "$TMP_ROOT/bin/fzf"
 assert_contains "The agent picker lists assistants first, starred" "★ tp-guia" "$(head -n 1 "$TMP_ROOT/rows")"
 tmux -L "$USER_SOCKET" send-keys -t =op: M-o
 assert_true "Alt+o takes the operator to the assistant" "wait_for 8 \"$P list-clients -F '#{client_session}' | grep -qx tp-guia\""
-assert_eq "…and the status bar stops calling" "" "$($P show-options -gqv @prama_assist)"
+assert_true "…and the status bar stops calling" "wait_for 5 '[ -z \"\$($P show-options -gqv @prama_assist)\" ]'"
 sleep 1.1; tmux -L "$USER_SOCKET" send-keys -t =op: 'hola'; sleep 0.5
 out=$(PRAMA_SESSION=tp-aco "$BIN" bus assign tp-guia "revisa esto" 2>&1)
 assert_contains "A message to an assistant the operator is talking to waits in its queue" "está hablando con" "$out"
