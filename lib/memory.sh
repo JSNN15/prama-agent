@@ -178,8 +178,20 @@ _mem_show() {
 }
 
 # _mem_add [target] [--team T] [--zone-wide] "<note>"
+# An agent writes only to its own team's memory or its own zone's (invariant 17).
+_mem_check_writer() {
+  [ -n "${PRAMA_SESSION:-}" ] && [ -f "$(state_file "$PRAMA_SESSION")" ] || return 0
+  local own_zone own_team='' c
+  own_zone=$(state_get "$PRAMA_SESSION" ZONE)
+  if c=$(session_team "$PRAMA_SESSION" 2>/dev/null) && [ -n "$c" ]; then own_team=$(team_name "$c"); fi
+  [ "$MEM_ZONE" = "$own_zone" ] || die "$(_t "An agent writes only to its own zone's memory (%s)." "${own_zone:-?}")"
+  [ -z "$MEM_TEAM" ] || [ "$MEM_TEAM" = "$own_team" ] \
+    || die "$(_t "An agent writes only to its own team's memory (%s) or, with --zone-wide, its zone's." "${own_team:-—}")"
+}
+
 _mem_add() {
   MEM_CMD=add _mem_args "$@"
+  _mem_check_writer
   local note="${MEM_REST[*]:-}" f by stamp tmp
   note=${note//$'\r'/}; note=${note//$'\n'/ }; note=${note//$'\t'/ }
   note=$(_feedback_redact "$note" 2>/dev/null || printf '%s' "$note")

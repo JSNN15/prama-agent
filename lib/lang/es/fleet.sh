@@ -79,4 +79,5 @@ I18N+=(
   ['blocked by its quota %s ago: %s']='bloqueada por su cuota hace %s: %s'
   ['near the limit (%s)']='cerca del límite (%s)'
   ['quota not known yet']='cuota aún desconocida'
+  ['Isolated team: %s works on its own branch %s.']='Equipo aislado: %s trabaja en su propia rama %s.'
 )

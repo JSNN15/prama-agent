@@ -352,6 +352,9 @@ _swarm_stop_team() {
 cockpit_session() {
   local team=''
   [ -n "${2:-}" ] && team=$(team_name "$2")
+  # Agents outside any team, in a zone that has teams: their own view (the zone's name is the
+  # principal team's cockpit).
+  if [ -z "${2:-}" ] && [ -n "$(zone_teams "$1")" ]; then slugify "${PRAMA_SESSION_PREFIX}-cockpit-$1-solo"; return 0; fi
   if [ -n "$team" ] && [ "$team" != "$PRAMA_DEFAULT_TEAM" ]; then
     slugify "${PRAMA_SESSION_PREFIX}-cockpit-$1-$team"
   else
@@ -377,6 +380,8 @@ _cockpit_members() {
   while IFS='|' read -r s _ z; do
     [ "$z" = "$zone" ] || continue
     if [ -n "$coord" ] && [ "$s" != "$coord" ] && [ "$(state_get "$s" PARENT)" != "$coord" ]; then continue; fi
+    # Without a coordinator: the zone's agents that are in no team (never another team's members).
+    if [ -z "$coord" ] && session_team "$s" >/dev/null 2>&1; then continue; fi
     (( n++ < max )) || break
     printf '%s\n' "$s"
   done < <(prama_team_order)
@@ -400,8 +405,14 @@ cockpit_ensure() {
      && [ -s "$(plan_root)/$(slugify "$zone")/$(team_name "$pcoord")/tasks" ]; then plan_on=1; fi
   sig="${members[*]} plan=$plan_on"
   ensure_tmux_conf
-  if tmx_has "$cs" && [ "$(tmx show-options -qv -t "=$cs" @prama_team 2>/dev/null)" != "$sig" ]; then
-    tmx kill-session -t "=$cs" 2>/dev/null   # viewers only
+  # Session options take a pane target ("=name:"): with "=name" tmux 3.4 refuses them and the
+  # cockpit would look outdated on every call (rebuilt, its viewers kicked out).
+  local old=''
+  if tmx_has "$cs" && [ "$(tmx show-options -qv -t "=$cs:" @prama_team 2>/dev/null)" != "$sig" ]; then
+    # The team changed: build the new layout beside the old one, move its viewers over, then drop
+    # the old one (killing it first would detach them: detach-on-destroy).
+    old="$cs-old-$$"
+    tmx rename-session -t "=$cs" "$old" 2>/dev/null || { tmx kill-session -t "=$cs" 2>/dev/null; old=''; }
   fi
   if ! tmx_has "$cs"; then
     local env_args=(-e "PATH=$PATH" -e "PRAMA_TMUX_SOCKET=$PRAMA_TMUX_SOCKET" -e "PRAMA_TMUX_CONF=$PRAMA_TMUX_CONF"
@@ -434,11 +445,18 @@ cockpit_ensure() {
     pane=$(tmx split-window -P -F '#{pane_id}' -t "$last" -c "$dir" "${env_args[@]}" "${watch_cmd% }") \
       && tmx select-pane -t "$pane" -T "$(_t '☍ BUS · live events')" 2>/dev/null
     # Coordinator large on the left, the rest stacked on the right.
-    tmx set-option -w -t "$cs" main-pane-width 58% 2>/dev/null
+    tmx set-option -w -t "$first" main-pane-width 58% 2>/dev/null
     tmx select-layout -t "$first" main-vertical >/dev/null 2>&1
     tmx set-option -wu -t "$first" window-size 2>/dev/null   # follow the attached client again
-    tmx set-option -t "=$cs" @prama_team "$sig" 2>/dev/null
-    tmx set-option -t "=$cs" @prama_zone "$zone" 2>/dev/null
+    tmx set-option -t "=$cs:" @prama_team "$sig" 2>/dev/null
+    tmx set-option -t "=$cs:" @prama_zone "$zone" 2>/dev/null
+  fi
+  if [ -n "$old" ]; then
+    local cl
+    while IFS= read -r cl; do
+      [ -n "$cl" ] && tmx switch-client -c "$cl" -t "=$cs" 2>/dev/null
+    done < <(tmx list-clients -t "=$old" -F '#{client_name}' 2>/dev/null)
+    tmx kill-session -t "=$old" 2>/dev/null   # viewers only
   fi
   if [ -n "$focus" ]; then
     p=$(tmx list-panes -t "=$cs" -F '#{pane_id} #{@prama_view}' 2>/dev/null | awk -v s="$focus" '$2 == s { print $1; exit }')
@@ -477,8 +495,8 @@ subcmd_cockpit() {
   while (( $# )); do
     case "$1" in
       --no-attach) attach=0; shift ;;
-      --focus)     focus=${2:-}; shift 2 ;;
-      --team|-T)   team=${2:-}; shift 2 ;;
+      --focus)     focus=${2:?$(_t '--focus requires a session')}; shift 2 ;;
+      --team|-T)   team=${2:?$(_t '--team requires a name')}; shift 2 ;;
       *)           arg=$1; shift ;;
     esac
   done
@@ -519,11 +537,14 @@ nav_main() {
   esac
 }
 
+# The agent picker in a popup on <client>. Called from run-shell (the Alt+a binding and the ☰
+# button): display-popup itself does not expand #{client_name}, so it cannot name its client.
 _nav_popup() {
-  local nav
+  local nav title=()
   printf -v nav 'env PRAMA_TMUX_SOCKET=%q PRAMA_STATE_HOME=%q %q --internal-nav pick %q' \
     "$PRAMA_TMUX_SOCKET" "$PRAMA_STATE_HOME" "$SELF_PATH" "$1"
-  tmx display-popup -c "$1" -E -w 92% -h 75% "$nav" 2>/dev/null
+  if tmux_at_least 3 3; then local t; _tv t ' agents · ↵ go · Esc close '; title=(-T "$t"); fi
+  tmx display-popup -c "$1" -E -w 92% -h 75% ${title[@]+"${title[@]}"} "$nav" 2>/dev/null
 }
 
 _nav_switch() { tmx switch-client -c "$1" -t "=$2" 2>/dev/null; }
@@ -620,7 +641,7 @@ _nav_pick() {
   local -a rows=() targets=() zones_seen=()
   local -A zseen=()
   while IFS='|' read -r s depth zone; do
-    st=$(detect_session_state "$s")
+    st=$(bus_session_state "$s")
     role=$(session_role "$s") agent=$(state_get "$s" AGENT)
     model=$(health_get "$s" MODEL "$(state_get "$s" MODEL)")
     q=$(quota_label "$s")

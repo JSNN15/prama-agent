@@ -301,16 +301,21 @@ watchdog_ensure() {
 
 # Coordinators that should hear about problems of <session>: its own team's coordinator when it
 # has one (other teams of the zone are not told), otherwise the coordinators of its zone.
+# A coordinator's own problems go to the operator only (Telegram): other teams are not told
+# (invariant 14). An agent outside any team is reported to its zone's coordinator only when the
+# zone has a single team, never to several.
 _watch_coordinators() {
   local s=$1 zone c
-  if c=$(session_team "$s") && [ "$c" != "$s" ]; then printf '%s\n' "$c"; return 0; fi
+  local -a cs=()
+  if c=$(session_team "$s"); then
+    [ "$c" != "$s" ] && printf '%s\n' "$c"
+    return 0
+  fi
   zone=$(state_get "$s" ZONE)
-  while IFS= read -r c; do
-    [ "$c" = "$s" ] && continue
-    [ "$(session_role "$c")" = coordinator ] || continue
-    [ -z "$zone" ] || [ "$(state_get "$c" ZONE "$zone")" = "$zone" ] || continue
-    printf '%s\n' "$c"
-  done < <(prama_sessions)
+  [ -n "$zone" ] || return 0
+  mapfile -t cs < <(zone_teams "$zone")
+  (( ${#cs[@]} == 1 )) && [ "${cs[0]}" != "$s" ] && printf '%s\n' "${cs[0]}"
+  return 0
 }
 
 _watch_alert() {
@@ -330,7 +335,9 @@ watchdog_tick() {
   declare -A seen=()
   while IFS= read -r s; do
     seen[$s]=1
-    st=$(detect_session_state "$s")
+    # With the pane's command: a supervisor that dropped to a plain shell is SHELL, never READY
+    # (a queued task typed there would run as a shell command).
+    st=$(bus_session_state "$s")
     info=''
     [ "$st" = BLOCKED ] && info=$(session_block_info "$s")
     reason=${info%%|*} detail=${info#*|}
@@ -376,12 +383,16 @@ watchdog_tick() {
     if [ "$st" = READY ] && [ "$(session_role "$s")" != daemon ]; then
       # A message prama pasted while the CLI was busy can stay in the prompt unsent: press Enter
       # for it, once, and only shortly after prama typed it (a paste of the operator's is theirs).
+      # Someone typing in the session since then (attached or from the cockpit) owns that paste.
       local sent; sent=$(state_get "$s" SENT_TS)
-      if [[ "$sent" =~ ^[0-9]+$ ]] && (( ${EPOCHSECONDS:-$(date +%s)} - sent < 120 )) && tmx_unsent_paste "$s"; then
-        state_set "$s" SENT_TS=
-        tmx send-keys -t "=$s:" Enter 2>/dev/null
-        _tv msg '→ %s: unsent message submitted' "$s"; _watch_log "$msg"
-        W_READY[$s]=-1
+      if [[ "$sent" =~ ^[0-9]+$ ]]; then
+        if (( ${EPOCHSECONDS:-$(date +%s)} - sent < 120 )) && tmx_unsent_paste "$s" \
+           && ! session_human_active "$s" $(( sent + 1 )); then
+          tmx send-keys -t "=$s:" Enter 2>/dev/null
+          _tv msg '→ %s: unsent message submitted' "$s"; _watch_log "$msg"
+          W_READY[$s]=-1
+        fi
+        state_set "$s" SENT_TS=   # submitted, or not prama's to submit any more
       fi
       W_READY[$s]=$(( ${W_READY[$s]:-0} + 1 ))
       if (( W_READY[$s] >= 2 )) && (( $(queue_len "$s") > 0 )); then
@@ -392,7 +403,7 @@ watchdog_tick() {
             _tv msg '→ %s: queued task delivered' "$s"; _watch_log "$msg"
             bus_event assign watchdog "$s" "$task"
           else
-            queue_push "$s" "$task"
+            queue_push_front "$s" "$task"   # keeps its place in the queue
           fi
           W_READY[$s]=0
         fi

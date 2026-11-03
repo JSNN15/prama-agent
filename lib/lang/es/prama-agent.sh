@@ -57,7 +57,6 @@ I18N+=(
   [' %d sessions will be closed: %s\n Continue? [y/N] ']=' Se cerrarán %d sesiones: %s\n ¿Continuar? [s/N] '
   ['Cancelled.']='Cancelado.'
   ["Session '%s' closed."]='Sesión '\''%s'\'' cerrada.'
-  ["Agent relaunched in '%s' (history is kept)."]='Agente relanzado en '\''%s'\'' (el historial se conserva).'
   ['N must be a number.']='N debe ser un número.'
   ['last %s lines']='últimas %s líneas'
   ['Usage: prama-agent send <session> "<text>"']='Uso: prama-agent send <sesión> "<texto>"'
@@ -158,4 +157,5 @@ I18N+=(
   ['all']='todos'
   ['Policy: yolo %s · profiles %s · merges %s · Telegram screens %s']='Política: yolo %s · perfiles %s · merge %s · pantallas TG %s'
   ['Your user is in the '\''%s'\'' group: agents can get root. See docs/HARDENING.md.']='Tu usuario está en el grupo '\''%s'\'': los agentes pueden obtener root. Ver docs/HARDENING.es.md.'
+  ['Only the operator can stop every agent; an agent closes its own with '\''prama-agent fleet kill <session>'\''.']='Solo el operador puede detener a todos los agentes; un agente cierra los suyos con '\''prama-agent fleet kill <sesión>'\''.'
 )

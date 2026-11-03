@@ -46,9 +46,19 @@ compose_session_cmd() {
   local af
   af=$(state_args_file "$s")
   [ -f "$af" ] && mapfile -d '' -t PASS < "$af"
-  [ "$role" != executor ] && role_prompt=$(build_role_system_prompt "$role" "$s" "$zone")
+  # Same rule as the first launch: an executor of a team keeps its prompt (bus, branch, plan).
+  role_prompt=$(session_role_prompt "$s")
+  # claude: a conversation that never got a message has no transcript yet, so there is nothing to
+  # resume: restart it fresh with the same id.
+  [ "$agent" = claude ] && [ -n "$AGENT_SID" ] && ! claude_conversation_exists "$AGENT_SID" && AGENT_RESUME=0
   PROFILE=$profile build_agent_command "$agent" "$perm" "$remote" "$s" "$role_prompt" ${PASS[@]+"${PASS[@]}"}
   COMPOSED_ROLE_PROMPT=$role_prompt
+}
+
+# claude_conversation_exists <id> → 0 when Claude Code saved a transcript for that conversation.
+claude_conversation_exists() {
+  [[ "$1" =~ ^[A-Za-z0-9-]+$ ]] || return 1
+  compgen -G "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/$1.jsonl" >/dev/null
 }
 
 # True when the pass-through args already pick a conversation (then prama does not add one).
@@ -113,8 +123,17 @@ build_agent_command() {
       [ -n "$model" ] && CMD+=(--model "$model")
       [ -n "$effort" ] && CMD+=(--effort "$effort")
       # Conversation id comes from agy's hooks (conversationId); restarts resume it.
+      local resumed=0
       if (( AGENT_RESUME )) && [ -n "$AGENT_SID" ] && ! _pass_has "--conversation --continue -c" "$@"; then
-        CMD+=(--conversation "$AGENT_SID")
+        CMD+=(--conversation "$AGENT_SID"); resumed=1
+      fi
+      # agy has no system-prompt flag: the role prompt (bus, team, branch, plan) opens a new
+      # conversation as its first message. A resumed one already has it.
+      local aprompt=$role_prompt aextra
+      aextra=$(preset_prompt)
+      [ -n "$aextra" ] && aprompt+="${aprompt:+$'\n\n'}$aextra"
+      if [ -n "$aprompt" ] && (( ! resumed )) && ! _pass_has "--continue -c --prompt-interactive -i --print -p --prompt" "$@"; then
+        CMD+=(--prompt-interactive "$aprompt"$'\n\n'"$(_t 'These are your standing instructions for this session (prama sends them as your first message). Reply only "OK" and wait for tasks.')")
       fi
       # Status line telemetry (quota) stacked under agy's own status line; --settings is
       # session-only and never saved to the user's settings.
@@ -322,8 +341,15 @@ worktree_path() {
   local base_dir=$1 branch=$2
   local legacy="$base_dir/worktrees/$branch"
   if [ -d "$legacy" ]; then printf '%s' "$legacy"; return; fi   # created by v5
-  local root=${PRAMA_WORKTREE_ROOT:-$(dirname "$base_dir")/.prama-worktrees}
-  printf '%s/%s/%s' "$root" "$(basename "$base_dir")" "$(slugify "$branch")"
+  local root=${PRAMA_WORKTREE_ROOT:-$(dirname "$base_dir")/.prama-worktrees} slug p cur
+  slug=$(slugify "$branch")
+  p="$root/$(basename "$base_dir")/$slug"
+  # Two branches can share a folder name (feature/x and feature-x): a folder checked out on another
+  # branch belongs to that one, this branch gets its own.
+  if [ -d "$p" ] && cur=$(git -C "$p" symbolic-ref --short -q HEAD 2>/dev/null) && [ "$cur" != "$branch" ]; then
+    p+="-$(printf '%s' "$branch" | cksum | cut -d' ' -f1)"
+  fi
+  printf '%s' "$p"
 }
 
 # provision_worktree <repo_dir> <branch> → prints the worktree path; returns 1 on failure.
@@ -382,10 +408,28 @@ _launch_check_caller() {
   [ "$cp" = yolo ] && return 0
   for a in ${PASS[@]+"${PASS[@]}"}; do
     case $a in
-      *dangerously*|--yolo*|--permission-mode*|--approval-mode*|--allowedTools*|--allowed-tools*|--settings*)
+      # claude, agy (--mode auto|accept-edits), opencode (--auto)
+      *dangerously*|--yolo*|--permission-mode*|--approval-mode*|--allowedTools*|--allowed-tools*|--settings*|--mode|--mode=*|--auto|--auto=*)
         warn "$(_t "An agent cannot pass '%s' to the agent it launches." "$a")"; return 1 ;;
     esac
   done
+  return 0
+}
+
+# The guard rails of 'fleet spawn' for every launch an agent makes (a direct 'prama-agent claude
+# <zone> …' included): never a coordinator, only in its own zone, within PRAMA_FLEET_MAX.
+_launch_check_agent_caller() {
+  local zone=$1 role=$2 c=${PRAMA_SESSION:-} cz live
+  [ -n "$c" ] && [ -f "$(state_file "$c")" ] || return 0
+  if [ "$role" = coordinator ]; then warn "$(_t 'An agent cannot launch another coordinator.')"; return 1; fi
+  cz=$(state_get "$c" ZONE)
+  if [ "${PRAMA_FLEET_SCOPE:-zone}" != all ] && [ -n "$cz" ] && [ "$cz" != "$zone" ]; then
+    warn "$(_t 'You can only launch agents in your zone (%s).' "$cz")"; return 1
+  fi
+  live=$(prama_sessions | grep -c . || true)
+  if (( live >= ${PRAMA_FLEET_MAX:-8} )); then
+    warn "$(_t "Fleet limit reached (%s/%s). Close agents with 'prama-agent fleet kill'." "$live" "${PRAMA_FLEET_MAX:-8}")"; return 1
+  fi
   return 0
 }
 
@@ -425,6 +469,10 @@ launch_agent() {
 
   [ -n "$name" ] || name=$(session_name_for "$agent" "$zone" "$role" "$wt")
   valid_session_name "$name" || { warn "$(_t "Invalid session name: '%s' (letters, digits, - and _; max 48)" "$name")"; return 1; }
+  # Names prama keeps for itself (watchdog, Telegram bot, cockpits) would hide the agent from every
+  # list and from the PRAMA_FLEET_MAX count.
+  is_internal_session "$name" && { warn "$(_t "'%s' is a name prama reserves for its own sessions." "$name")"; return 1; }
+  _launch_check_agent_caller "$zone" "$role" || return 1
 
   ensure_tmux_conf
 
@@ -448,11 +496,22 @@ launch_agent() {
     target_d=$(provision_worktree "$dir" "$wt") || return 1
   fi
 
-  local role_prompt="" parent_s=${PRAMA_PARENT:-${PRAMA_SESSION:-}}
+  # Team: a coordinator gets it from swarm (PRAMA_TEAM, only read for a coordinator); an agent a
+  # coordinator launches joins that coordinator's team, whatever the environment says.
+  local parent=${PRAMA_PARENT:-${PRAMA_SESSION:-operator}} team='' tcoord=''
+  if [ "$parent" != operator ] && [ "$(session_role "$parent")" = coordinator ]; then
+    tcoord=$parent team=$(team_name "$parent")
+  elif [ "$role" = coordinator ]; then
+    team=${PRAMA_TEAM:-}
+  fi
+  local role_prompt=""
   # A plain executor gets no prompt (it is your own agent); one launched into a team learns the
   # bus, its coordinator and, in an isolated team, its branch.
-  if [ "$role" != "executor" ] || { [ -n "$parent_s" ] && [ "$(session_role "$parent_s")" = coordinator ]; }; then
-    role_prompt=$(PRAMA_WT_BRANCH=$wt PRAMA_WT_DIR=$target_d build_role_system_prompt "$role" "$name" "$zone")
+  if role_wants_prompt "$role" "$parent"; then
+    local tbase=${PRAMA_TEAM_BASE:-} tiso=${PRAMA_TEAM_ISOLATE:-0}
+    if [ -n "$tcoord" ]; then tbase=$(state_get "$tcoord" BASE "$tbase") tiso=$(state_get "$tcoord" ISOLATE 0); fi
+    role_prompt=$(TEAM_HINT=$team PRAMA_WT_BRANCH=$wt PRAMA_WT_DIR=$target_d PRAMA_TEAM_BASE=$tbase PRAMA_TEAM_ISOLATE=$tiso \
+      build_role_system_prompt "$role" "$name" "$zone")
   fi
   # A known conversation id lets prama restart the agent in place (new model, preset…) and
   # resume exactly this conversation, even with several agents in the same directory.
@@ -482,14 +541,12 @@ launch_agent() {
   fi
   tmx new-session -d -s "$name" -x "${COLS:-120}" -y 40 -c "$target_d" "${tmux_env[@]}" "${runner_s% }" \
     || { warn "$(_t "tmux could not create session '%s'." "$name")"; return 1; }
-  # Team: given for a coordinator (PRAMA_TEAM), inherited from the coordinator that launches an agent.
-  local team=${PRAMA_TEAM:-} parent=${PRAMA_PARENT:-${PRAMA_SESSION:-operator}}
-  if [ -z "$team" ] && [ "$parent" != operator ] && [ "$(session_role "$parent")" = coordinator ]; then
-    team=$(team_name "$parent")
-  fi
   state_write "$name" ROLE="$role" AGENT="$agent" ZONE="$zone" PROFILE="$profile" PERM="$perm" ${team:+TEAM="$team"} \
     REMOTE="$remote" MODEL="$AGENT_MODEL" EFFORT="$AGENT_EFFORT" PRESET="$PRESET" WORKTREE="$wt" \
     SESSION_ID="$sid" PARENT="$parent" TARGET_DIR="$target_d" STARTED_AT="$(date -Iseconds)"
+  # Always rewritten: a file left by a runner that was killed hard would hand its old flags (yolo…)
+  # to the next agent with this name.
+  rm -f "$(state_args_file "$name")"
   if (( ${#PASS[@]} )); then printf '%s\0' "${PASS[@]}" > "$(state_args_file "$name")"; fi
   bus_event started "${PRAMA_SESSION:-operator}" "$name" "$agent@$zone ($role, $perm${AGENT_MODEL:+, $AGENT_MODEL}${PRESET:+, preset $PRESET})"
   watchdog_ensure || true

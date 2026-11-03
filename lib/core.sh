@@ -270,6 +270,9 @@ tmx_kill() {
 # prompt unsent ("[Pasted text #1 +1 lines]").
 tmx_send() {
   local s=$1 text=$2 buf="prama-send-$$-$RANDOM"
+  # Control characters would reach the CLI as keystrokes (ESC ends a bracketed paste, ESC [ Z is
+  # Shift+Tab — Claude's permission mode —, ^C, CR submits early): text only.
+  text=${text//[[:cntrl:]]/ }
   printf '%s' "$text" | tmx load-buffer -b "$buf" - || return 1
   tmx paste-buffer -p -d -b "$buf" -t "=$s:" || { tmx delete-buffer -b "$buf" 2>/dev/null; return 1; }
   sleep "${PRAMA_SEND_DELAY:-0.3}"
@@ -285,12 +288,29 @@ tmx_unsent_paste() {
   tmx_capture "$1" 8 | grep -q '^[❯>] *\[Pasted text #[0-9]'
 }
 
-# Prints the last N lines of a session's active pane (ansi=1 keeps colors).
+# Prints the last N lines of a session's active pane (ansi=1 keeps colors). "-S -N" alone would
+# return N lines of history PLUS the whole visible screen (stale text drives the state detection):
+# the capture is cut to the last N lines that are not the blank area below the cursor (trailing
+# blanks dropped: tmux 3.2 keeps them on joined lines).
 tmx_capture() {
   local s=$1 lines=${2:-40} ansi=${3:-0}
   local flags=(-p -J)
   (( ansi )) && flags+=(-e)
-  tmx capture-pane "${flags[@]}" -t "=$s:" -S "-$lines" 2>/dev/null
+  [[ "$lines" =~ ^[0-9]+$ ]] || lines=40
+  tmx capture-pane "${flags[@]}" -t "=$s:" -S "-$lines" 2>/dev/null \
+    | awk -v n="$lines" '{ sub(/[ \t]+$/, ""); l[NR] = $0 } /[^[:space:]]/ { last = NR }
+        END { if (!last) exit; s = last - n + 1; if (s < 1) s = 1; for (i = s; i <= last; i++) print l[i] }'
+}
+
+# session_human_active <session> <since epoch> → 0 when a client attached to the session (directly
+# or as a cockpit viewer) has had keyboard or mouse activity since <since>: someone is at it. A
+# client's activity starts at its creation time (attaching is not typing; resizes do not count).
+session_human_active() {
+  local a c since=${2:-0}
+  while IFS=' ' read -r a c; do
+    [[ "$a" =~ ^[0-9]+$ && "$c" =~ ^[0-9]+$ ]] && (( a > c && a >= since )) && return 0
+  done < <(tmx list-clients -t "=$1" -F '#{client_activity} #{client_created}' 2>/dev/null)
+  return 1
 }
 
 # Lists sessions on the prama server. Internal sessions (telegram bot, watchdog, cockpits) are
@@ -379,11 +399,14 @@ prama_team_order() {
     zone_of[$s]=$(state_get "$s" ZONE) parent_of[$s]=$(state_get "$s" PARENT) role_of[$s]=$(session_role "$s")
   done
   for z in "${ZONES[@]}"; do zorder+=("$z"); seenz[$z]=1; done
+  # A session without a zone (state lost, launched by hand) still gets listed: '-' stands for it,
+  # an empty key would abort the whole listing ("bad array subscript").
   for s in ${all[@]+"${all[@]}"}; do
+    [ -n "${zone_of[$s]}" ] || zone_of[$s]=-
     z=${zone_of[$s]}
     [ -n "${seenz[$z]:-}" ] || { zorder+=("$z"); seenz[$z]=1; }
   done
-  for z in "${zorder[@]}"; do
+  for z in ${zorder[@]+"${zorder[@]}"}; do
     for c in ${all[@]+"${all[@]}"}; do
       [ "${zone_of[$c]}" = "$z" ] && [ "${role_of[$c]}" = coordinator ] || continue
       printf '%s|0|%s\n' "$c" "$z"; used[$c]=1
@@ -465,37 +488,46 @@ tmx_attach() {
   "${cmd[@]}" || true
 }
 
+# tmux_at_least <major> <minor> → 0 when the installed tmux is that version or newer (cached).
+tmux_at_least() {
+  if [ -z "${TMUX_VER_CACHE:-}" ]; then
+    TMUX_VER_CACHE=$(tmux -V 2>/dev/null); TMUX_VER_CACHE=${TMUX_VER_CACHE#tmux }
+    [[ "$TMUX_VER_CACHE" =~ ^(next-)?([0-9]+)\.([0-9]+) ]] && TMUX_VER_CACHE="${BASH_REMATCH[2]} ${BASH_REMATCH[3]}" || TMUX_VER_CACHE='0 0'
+  fi
+  local maj=${TMUX_VER_CACHE% *} min=${TMUX_VER_CACHE#* }
+  (( maj > $1 || (maj == $1 && min >= $2) ))
+}
+
 # Writes the managed tmux config for the prama server (never ~/.tmux.conf) and reloads it.
-TMUX_CONF_VERSION="prama-agent-managed-v6.4.0"
+TMUX_CONF_VERSION="prama-agent-managed-v6.8.1"
 ensure_tmux_conf() {
   local force=${1:-0}
   # The theme and the language are part of the generated file: changing either regenerates it.
-  local style="# style: theme=${UI_THEME:-midnight} lang=${PRAMA_UI_LANG:-en}"
+  # So are the keys, the compact width and prama's own path (the bindings call it back).
+  local style="# style: theme=${UI_THEME:-midnight} lang=${PRAMA_UI_LANG:-en} keys=$PRAMA_MENU_KEY,$PRAMA_NAV_KEY,$PRAMA_COCKPIT_KEY cols=${PRAMA_COMPACT_COLS:-100} self=${SELF_PATH:-prama-agent}"
   if (( force )) || [ ! -f "$PRAMA_TMUX_CONF" ] || ! grep -q "$TMUX_CONF_VERSION" "$PRAMA_TMUX_CONF" 2>/dev/null \
      || ! grep -qxF "$style" "$PRAMA_TMUX_CONF" 2>/dev/null \
      || ! grep -q "bind -n $PRAMA_MENU_KEY " "$PRAMA_TMUX_CONF" 2>/dev/null; then
     local tmp="$PRAMA_TMUX_CONF.tmp.$$" nav
     local A=${TH_ACCENT:-#38bdf8} H=${TH_HEAD:-#0f172a} T=${TH_TEXT:-#e2e8f0} B=${TH_BADGE:-#1e293b}
     local BD=${TH_BORDER:-#334155} M=${TH_MUTED:-#64748b} OK=${TH_OK:-#34d399} SEL=${TH_SEL:-#1e3a5f} SF=${TH_SELFG:-#f0f9ff}
-    local l_agents l_hint l_nav
-    _tv l_agents 'AGENTS'; _tv l_hint ' agents · ↵ go · Esc close '; _tv l_nav '%s agents · %s cockpit' "$PRAMA_NAV_KEY" "$PRAMA_COCKPIT_KEY"
+    local l_agents l_nav
+    _tv l_agents 'AGENTS'; _tv l_nav '%s agents · %s cockpit' "$PRAMA_NAV_KEY" "$PRAMA_COCKPIT_KEY"
     # Key bindings call back into prama with this server's socket and state (tmux does not
     # pass the client's environment to run-shell / display-popup).
     printf -v nav 'env PRAMA_TMUX_SOCKET=%q PRAMA_STATE_HOME=%q %q --internal-nav' \
       "$PRAMA_TMUX_SOCKET" "$PRAMA_STATE_HOME" "${SELF_PATH:-prama-agent}"
     # Clickable status ranges need tmux ≥ 3.3 (Ubuntu 22.04 ships 3.2a: plain buttons there).
-    local tv left_btns ptitle='' status_left status_right narrow
+    local left_btns status_left status_right narrow
     local right_full="#[fg=$M]#{session_name} #[fg=$OK]● #[fg=$T]%H:%M "
     status_right=$right_full
-    tv=$(tmux -V 2>/dev/null); tv=${tv#tmux }; tv=${tv%%[a-z-]*}
-    if [[ "$tv" =~ ^([0-9]+)\.([0-9]+) ]] && (( BASH_REMATCH[1] > 3 || (BASH_REMATCH[1] == 3 && BASH_REMATCH[2] >= 3) )); then
+    if tmux_at_least 3 3; then
       left_btns="#[range=user|menu]#[bg=$A,fg=$H,bold] ◂ MENU #[norange]#[range=user|agents]#[bg=$B,fg=$T] ☰ $l_agents #[norange]#[range=user|cockpit]#[bg=$BD,fg=$T] ▦ COCKPIT #[norange]#[default] "
       # Phones: wide tap targets, icons only, plus previous / next agent.
       local left_compact="#[range=user|menu]#[bg=$A,fg=$H,bold]  ◂  #[norange]#[range=user|prev]#[bg=$B,fg=$T]  ◀  #[norange]#[range=user|agents]#[bg=$BD,fg=$T]  ☰  #[norange]#[range=user|next]#[bg=$B,fg=$T]  ▶  #[norange]#[range=user|cockpit]#[bg=$BD,fg=$T]  ▦  #[norange]#[default] "
       narrow="#{e|<:#{client_width},${PRAMA_COMPACT_COLS:-100}}"
       left_btns="#{?$narrow,${left_compact//,/#,},${left_btns//,/#,}}"
       status_right="#{?$narrow,#[fg=$T]#{=|12|…:#{s/^${PRAMA_SESSION_PREFIX}-//:session_name}} ,$right_full}"
-      ptitle="-T '$l_hint'"
     else
       left_btns="#[bg=$A,fg=$H,bold] ◂ MENU #[bg=$B,fg=$T] $l_nav #[default] "
       left_btns=${left_btns//,/#,}
@@ -543,13 +575,26 @@ setw -g mode-keys vi
 set -g detach-on-destroy on
 set -g base-index 0
 set -g renumber-windows on
+# Per-launch variables never belong to the server: tmux copies the environment of the process that
+# starts it into the global environment, and every later pane would inherit them (wrong team).
+set-environment -gu PRAMA_TEAM
+set-environment -gu PRAMA_TEAM_ISOLATE
+set-environment -gu PRAMA_TEAM_BASE
+set-environment -gu PRAMA_PARENT
+set-environment -gu PRAMA_SESSION
+set-environment -gu PRAMA_ROLE
+set-environment -gu PRAMA_WT_BRANCH
+set-environment -gu PRAMA_WT_DIR
+set-environment -gu PRAMA_SL_CACHE
+set-environment -gu IS_SANDBOX
 
 # Navigation (works inside agents and the cockpit; the agent keeps running):
 #   $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent picker · $PRAMA_COCKPIT_KEY team cockpit ⇄ agent
 #   prefix n / p: next / previous agent · prefix z: zoom the focused cockpit pane
 bind -n $PRAMA_MENU_KEY detach-client
 bind m detach-client
-bind -n $PRAMA_NAV_KEY display-popup -E -w 92% -h 75% $ptitle "$nav pick '#{client_name}'"
+# (display-popup does not expand #{client_name} in its command: run-shell does, then opens the popup)
+bind -n $PRAMA_NAV_KEY run-shell -b "$nav click '#{client_name}' '#{session_name}' agents"
 bind -n $PRAMA_COCKPIT_KEY run-shell -b "$nav cockpit '#{client_name}' '#{session_name}'"
 bind n run-shell -b "$nav next '#{client_name}' '#{session_name}'"
 bind p run-shell -b "$nav prev '#{client_name}' '#{session_name}'"
@@ -717,6 +762,16 @@ queue_push() {
   printf '%s' "$2" > "$f.tmp" && mv -f "$f.tmp" "$f"
 }
 
+# queue_push_front <target> <text> — puts a task back at the head of the queue (a delivery that
+# failed keeps its turn).
+queue_push_front() {
+  local d f
+  d=$(queue_dir "$1")
+  mkdir -p "$d/new" "$d/cur"
+  f=$(printf '%s/new/0000000000000000000-%05d-%s.task' "$d" "$$" "$RANDOM")
+  printf '%s' "$2" > "$f.tmp" && mv -f "$f.tmp" "$f"
+}
+
 # queue_pop <target> → prints the oldest task and removes it; returns 1 if empty.
 # Safe with several concurrent consumers: only one rename of a given file succeeds.
 queue_pop() {
@@ -858,6 +913,8 @@ detect_session_state() {
   snippet=$(tmx_capture "$s" 12)
   if [[ "$snippet" == *"PRAMA_STANDBY"* || "$snippet" == *"AGENTE FINALIZADO"* || "$snippet" == *"AGENT EXITED"* ]]; then printf 'STANDBY'
   elif [[ "$snippet" == *"PRAMA_DAEMON"* ]]; then printf 'DAEMON'
+  # A block reported by the CLI's own hooks wins over "Working…" text still on the screen.
+  elif _hook_block_info "$s" >/dev/null; then printf 'BLOCKED'
   elif [[ "$snippet" =~ esc\ to\ interrupt|Esc\ to\ cancel|Thinking|Working|Running…|Synthesizing ]]; then printf 'WORKING'
   elif session_block_info "$s" "$snippet" >/dev/null; then printf 'BLOCKED'
   elif [[ "$pcmd" =~ ^(bash|sh|zsh|fish)$ ]] && ! session_has_agent_process "$s"; then printf 'SHELL'
@@ -913,26 +970,28 @@ strip_ansi_stream() { sed -E 's/\x1b\[[0-9;?]*[ -\/]*[@-~]//g; s/\x1b\][^\x07]*\
 # session_block_info <session> [snippet] → "reason|detail"; returns 1 when the agent is not blocked.
 # Hook-reported health (deterministic) wins; the screen is the fallback for dialogs that appear
 # before hooks run (login, trust, model picker) and for CLIs without hooks.
+# _hook_block_info <session> → "reason|detail" while the CLI's hooks report it blocked. Transient
+# failures (quota windows, overload, server errors) expire after PRAMA_BLOCK_TTL: the next prompt
+# either works or fails again and re-reports. Auth/credit/model need a human or a change.
+_hook_block_info() {
+  local s=$1 reason ts
+  [ "$(health_get "$s" HEALTH)" = blocked ] || return 1
+  reason=$(health_get "$s" REASON error) ts=$(health_get "$s" TS 0)
+  if [[ "$reason" =~ ^(limit|error)$ ]] && (( ${EPOCHSECONDS:-$(date +%s)} - ts > ${PRAMA_BLOCK_TTL:-900} )); then
+    return 1
+  fi
+  printf '%s|%s' "$reason" "$(health_get "$s" DETAIL)"
+}
+
 session_block_info() {
   local s=$1 snippet=${2-}
-  if [ "$(health_get "$s" HEALTH)" = blocked ]; then
-    local reason ts
-    reason=$(health_get "$s" REASON error) ts=$(health_get "$s" TS 0)
-    # Transient failures (quota windows, overload, server errors) expire: the next prompt
-    # either works or fails again and re-reports. Auth/credit/model need a human or a change.
-    if [[ "$reason" =~ ^(limit|error)$ ]] && (( ${EPOCHSECONDS:-$(date +%s)} - ts > ${PRAMA_BLOCK_TTL:-900} )); then
-      :
-    else
-      printf '%s|%s' "$reason" "$(health_get "$s" DETAIL)"
-      return 0
-    fi
-  fi
+  _hook_block_info "$s" && return 0
   [ -n "$snippet" ] || snippet=$(tmx_capture "$s" 12)
-  # Hooks that report a healthy agent are authoritative for quota, credit and auth failures (the
-  # CLI reports those itself); the screen only adds the dialogs shown before hooks run. Otherwise a
-  # coordinator that is merely *reading* about a 429 would be marked blocked and stop receiving
-  # messages.
-  if [ "$(health_get "$s" HEALTH)" = ok ]; then
+  # Hooks that report on this agent (healthy, or a block that expired) are authoritative for quota,
+  # credit and auth failures (the CLI reports those itself); the screen only adds the dialogs shown
+  # before hooks run. Otherwise a coordinator that is merely *reading* about a 429 — or the old
+  # error text of an expired block — would keep the agent blocked and its queue stalled.
+  if [ -n "$(health_get "$s" HEALTH)" ]; then
     screen_block_reason "$snippet" 'login|trust|model'
   else
     screen_block_reason "$snippet"

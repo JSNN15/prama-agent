@@ -71,8 +71,9 @@ through the bus and can grow its own team (`swarm <its zone> --workers agy:2`), 
 agents.
 
 The **cockpit** shows the coordinator on the left, its agents stacked on the right and the live bus
-below; it is rebuilt automatically when agents join or leave. Inside prama's tmux, from any agent or
-from the cockpit:
+below; it is rebuilt when agents join or leave, and whoever is watching it stays in it. Agents outside
+any team have a cockpit of their own (`prama-cockpit-<zone>-solo` when the zone has teams). Inside
+prama's tmux, from any agent or from the cockpit:
 
 | Key | Status-bar button | Action |
 | --- | --- | --- |
@@ -105,7 +106,11 @@ prama-agent worktree sync prama-backend-sec-agy-2           # bring a branch up 
 - Role prompts carry the protocol: executors commit with evidence, coordinators split work by files,
   merge one branch at a time and ask the others to sync.
 - `swarm stop` removes the worktrees that are clean and merged and **keeps** any with unmerged or
-  uncommitted work (`worktree clean` does the same later).
+  uncommitted work (`worktree clean` does the same later). What counts as merged is checked on what
+  exists: the worktree's own commits too, even if its branch was renamed or deleted.
+- A worker closed with `fleet kill` keeps its branch and worktree: `worktree status` still lists it
+  (by branch), and `worktree merge prama/<team>/<name>` integrates it.
+- An executor the coordinator adds with `fleet spawn` also gets its own worktree.
 - Dependencies: each worktree is a fresh checkout. `.env` files are copied (`PRAMA_WORKTREE_COPY_FILES`);
   `PRAMA_WORKTREE_LINK="node_modules .venv"` shares heavy directories with the main checkout instead
   of reinstalling them; otherwise executors install what they need.
@@ -254,12 +259,19 @@ prama-agent fleet hooks status               # health hooks per agent CLI
 ```
 
 - **Watchdog.** An internal session starts with the first agent and stops when the fleet is empty. It
-  alerts the agent's team coordinator (the zone's coordinators for an agent outside a team) and
-  Telegram, if configured, when an agent becomes blocked, stops, recovers or crosses the quota
-  threshold, and delivers queued tasks once the agent is ready again.
+  alerts the agent's team coordinator and Telegram, if configured, when an agent becomes blocked,
+  stops, recovers or crosses the quota threshold, and delivers queued tasks once the agent is ready
+  again. Problems of a coordinator itself, or of an agent outside any team in a zone with several
+  teams, go to you (Telegram) only: no other team hears about them.
 - **Guard rails for agents** (against mistakes; see *Permissions and security*). An agent cannot act on itself or on a coordinator, only within its
-  scope (`PRAMA_FLEET_SCOPE=zone|children|all`), and `spawn` honours `PRAMA_FLEET_MAX`. Every action
-  is logged on the bus.
+  scope (`PRAMA_FLEET_SCOPE=zone|children|all`), and `spawn` honours `PRAMA_FLEET_MAX`. The same rules
+  apply when an agent uses the top-level commands (`stop`, `restart`, `send`, a direct
+  `prama-agent <agent> <zone>` launch, which can never create a coordinator); `stop --all` is yours
+  only. Every action is logged on the bus.
+- **Restarts keep the configuration.** `prama-agent restart`, `fleet restart` and Telegram's restart
+  button relaunch the agent in the same pane from its saved spec (model, preset, permissions changed
+  with `fleet edit` included) and resume its conversation; a Claude conversation that never got a
+  message starts fresh with the same id.
 - **Model changes never touch your defaults.** prama restarts the agent with `--model` instead of
   typing `/model`, which in Claude Code also rewrites your global default. agy model ids are
   validated against `agy models`, since agy silently falls back to its default on unknown ids.
@@ -293,10 +305,15 @@ prama-agent bus report "Endpoint ready; 18/18 tests pass"
 prama-agent bus watch                            # live events
 ```
 
-`assign` takes an exact session name or a role and never matches partially. Text is only typed into
-agents that are ready or working; anything else is queued (Maildir queues, multi-consumer safe)
-and the watchdog delivers it once the agent is ready. A usage-limit block is retried after
-`PRAMA_BLOCK_TTL` (15 min); `prama-agent send` is a raw passthrough.
+`assign` takes an exact session name or a role and never matches partially; a role only reaches the
+sender's own team (or, for an agent outside teams, its zone). Text is only typed into agents that are
+ready or working, never into a plain shell; anything else is queued (Maildir queues, multi-consumer
+safe) with its sender (`[TASK FROM <session>]`), and the watchdog delivers it once the agent is ready.
+Control characters are never typed. A usage-limit block is retried after `PRAMA_BLOCK_TTL` (15 min);
+`prama-agent send` types the text as is, without those rules.
+
+agy has no system-prompt flag, so a new agy conversation gets its role prompt (bus, team, branch,
+plan) as its first message; a resumed one already has it.
 
 ## Presets
 

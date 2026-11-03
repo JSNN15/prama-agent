@@ -51,7 +51,9 @@ creates private dirs).
    and again by the runner on every restart). `IS_SANDBOX=1` is exported only for yolo as root.
 8. Functions that can fail inside `$(...)` must be followed by `|| exit 1` / `|| return 1` — `die`
    only exits the subshell.
-9. **Never type into an agent that is not READY/WORKING** (`bus_can_inject`); BLOCKED agents get a queue.
+9. **Never type into an agent that is not READY/WORKING** (`bus_can_inject`, which reads the pane's
+   command: a supervisor dropped to a plain shell is SHELL); BLOCKED agents get a queue. `tmx_send`
+   types text only (control characters become spaces) and queued text carries its real sender.
    Because a wrong BLOCKED stops an agent's queue, screen detection is conservative: typed messages are
    skipped whole (CLIs wrap them without a marker), and with healthy hooks only pre-hook dialogs
    (login, trust, model) count.
@@ -61,16 +63,20 @@ creates private dirs).
 11. **Agents managing agents** go through `_fleet_authorize`: not itself, not a coordinator, within
     `PRAMA_FLEET_SCOPE`; `spawn` is capped by `PRAMA_FLEET_MAX`. The caller is resolved once per command
     by `prama_resolve_caller`: the session whose pane the process descends from wins over
-    `PRAMA_SESSION` (a mismatch is logged as an `identity` event). Guard rails, not a boundary: agents
-    share the operator's Unix user (docs/HARDENING.md).
+    `PRAMA_SESSION` (a mismatch is logged as an `identity` event). The top-level commands an agent can
+    run (`stop`, `restart`, `send`, a direct launch) apply the same rules; `stop --all` is the
+    operator's. Guard rails, not a boundary: agents share the operator's Unix user (docs/HARDENING.md).
 12. **Pane commands are bash.** They are built with `printf %q` (which may emit `$'…'`), so prama's
     tmux server runs commands with bash (`default-shell`) and only plain panes open the user's login
     shell (`default-command`). Never assume the user's shell can parse a generated command line.
 13. **Agents never publish.** The feedback channel writes local reports only; turning one into a
     GitHub issue is an explicit operator step (`feedback export`). Agents cannot close reports.
 14. **Teams do not leak into each other.** Routing is by team, never "the most recent coordinator":
-    reports and alerts go to `session_team` (the reporter's coordinator), role targets rank the
-    sender's own agents first, and `_fleet_authorize` refuses another team's agents.
+    reports and alerts go to `session_team` (the reporter's coordinator; a coordinator's own go to the
+    operator), role targets only reach the sender's own team (an agent outside teams: its zone's other
+    agents outside teams), and `_fleet_authorize` refuses another team's agents. Per-launch variables
+    (`PRAMA_TEAM`…) never reach the tmux server's global environment (`set-environment -gu` in the
+    generated tmux.conf), and an agent a coordinator launches takes its team from that coordinator.
 15. **prama never handles agent credentials.** `login` asks each CLI (`claude auth status`, agy's token
     file) and opens the CLI's own sign-in; `zones.conf` and every other prama file is data.
 16. **Translations are data and never change behaviour.** Catalogs only add `I18N[msgid]=text`; machine
