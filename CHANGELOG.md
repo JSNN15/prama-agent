@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.9.0] - 2026-11-03
+
+### Added
+- **Assistants: agents that work for the operator.** A new role, `assistant`: the coordinator (or the
+  operator) launches one with a brief, `fleet spawn <agent> <zone> --role assistant --brief "…"`, and
+  the operator talks to it directly while the team goes on building (a guide to the codebase, help
+  with the project's CLI or services, marketing copy, research). The brief is its system prompt (agy:
+  its first message), kept beside its state so restarts keep it; it stays within the brief and sends
+  what needs the team (a code change, a bug, a decision) to its coordinator with `bus report`.
+  Coordinators are told when and how to launch one.
+- **The operator is told, the screen is not moved**: `★ <name>` in the status bar (tap it, or
+  `Alt+o`, `PRAMA_ASSIST_KEY`), a message on every terminal attached to prama, and a Telegram
+  notification with **💬 Talk**. The agent list shows assistants first. `PRAMA_ASSIST_OPEN=switch`
+  takes an operator who has been idle for `PRAMA_ASSIST_IDLE` seconds (60) straight to it.
+- **Nobody types over the operator**: while they type in an agent (attached or from the cockpit), bus
+  messages to it wait in its queue, `PRAMA_HUMAN_HOLD` seconds (20) after the last key, or
+  `PRAMA_ASSIST_HOLD` (180) for an assistant; the watchdog delivers them afterwards.
+- What the operator types into an assistant is private: other agents cannot read its screen with
+  `logs`/`capture` (`PRAMA_ASSIST_PRIVATE=0` allows it). A plan task an assistant holds is never
+  flagged stale.
+
+### Changed
+- README: the coordinator choosing its executors and launching assistants; the comparison table is
+  dated by month and lists OpenCode (experimental).
+
 ## [6.8.1] - 2026-11-03
 
 A review of v6.8.0 found these, each reproduced on an isolated tmux server; every fix has a

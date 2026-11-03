@@ -91,9 +91,20 @@ bus_session_state() {
 # shell, the supervisor's standby menu, a daemon loop or a dead pane).
 bus_can_inject() {
   case "$(bus_session_state "$1")" in
-    READY|WORKING) return 0 ;;
+    READY|WORKING) ;;
     *) return 1 ;;
   esac
+  ! bus_operator_engaged "$1"
+}
+
+# True while the operator is talking to the session (typed in it, attached or from the cockpit,
+# within PRAMA_HUMAN_HOLD seconds; PRAMA_ASSIST_HOLD for an assistant, which is theirs): prama does
+# not type over them, the message waits in the queue and the watchdog delivers it afterwards.
+bus_operator_engaged() {
+  local hold=${PRAMA_HUMAN_HOLD:-20}
+  [ "$(session_role "$1")" = assistant ] && hold=${PRAMA_ASSIST_HOLD:-180}
+  [[ "$hold" =~ ^[0-9]+$ ]] && (( hold > 0 )) || return 1
+  session_human_active "$1" $(( ${EPOCHSECONDS:-$(date +%s)} - hold ))
 }
 
 # Live session with the given role, closest to the sender first: an agent the sender launched,
@@ -415,7 +426,11 @@ _bus_assign() {
   else
     queue_push "$dest" "$qmsg"
     bus_event queued "$sender" "$dest" "$msg"
-    warn "$(_t "'%s' is not ready to receive text (%s); task saved in its queue." "$dest" "$(bus_session_state "$dest")")"
+    if bus_operator_engaged "$dest"; then
+      warn "$(_t "The operator is talking to '%s'; the task waits in its queue and is delivered afterwards." "$dest")"
+    else
+      warn "$(_t "'%s' is not ready to receive text (%s); task saved in its queue." "$dest" "$(bus_session_state "$dest")")"
+    fi
   fi
 }
 

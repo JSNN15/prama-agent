@@ -992,6 +992,49 @@ assert_eq "A linked node_modules is not uncommitted work" "0" "$out"
 out=$(bash -c "$LIBS"'; a=$(provision_worktree "$1" feature/x 2>/dev/null); b=$(worktree_path "$1" feature-x); [ -n "$a" ] && [ "$a" != "$b" ] && echo distinct' _ "$R")
 assert_eq "Branches whose names slugify alike get their own folders" "distinct" "$out"
 
+section "Assistants: agents that work for the operator"
+"$BIN" stop --all -y >/dev/null 2>&1
+mock_ctl tp-aco interactive; PRAMA_TEAM=asis "$BIN" claude alpha --bg --role coordinator --name tp-aco >/dev/null
+tmux -L "$USER_SOCKET" new-session -d -s op -x 160 -y 40 "env -u TMUX TERM=xterm-256color tmux -L $PRAMA_TMUX_SOCKET attach-session -t =tp-aco"
+wait_for 5 "$P list-clients -F '#{client_session}' | grep -qx tp-aco"
+mock_ctl tp-guia interactive
+out=$(PRAMA_SESSION=tp-aco "$BIN" fleet spawn claude alpha --role assistant --name tp-guia --brief $'Guía del CLI de backend.\nSolo lectura del repo.' --json 2>&1)
+assert_true "A coordinator launches an assistant for the operator" "jq -e '.role == \"assistant\"' >/dev/null <<< '$out'"
+wait_for 5 "$P capture-pane -p -J -t '=tp-guia:' -S -300 | grep -q MOCK_AGENT"
+out=$($P capture-pane -p -J -t '=tp-guia:' -S -300)
+assert_contains "Its role prompt says it works for the operator" "PRAMA-SWARM ROLE: ASSISTANT" "$out"
+assert_contains "…with the brief it was given" "Guía del CLI de backend." "$out"
+assert_contains "…and who gave it" "tp-aco te dejó este encargo" "$out"
+assert_eq "The status bar calls the operator to it" "tp-guia" "$($P show-options -gqv @prama_assist)"
+assert_true "…and it is on the bus" "jq -e 'select(.event==\"assistant\" and .to==\"tp-guia\")' '$STATE/bus/events.jsonl' >/dev/null"
+cl=$($P list-clients -t '=tp-aco' -F '#{client_name}' | head -n 1)
+assert_contains "★ <name> shows in the operator's status bar" "★ tp-guia" "$($P display-message -p -c "$cl" -t '=tp-aco:' "$($P show-options -gqv status-left)")"
+printf '#!/usr/bin/env bash\ncat > "%s/rows"; exit 1\n' "$TMP_ROOT" > "$TMP_ROOT/bin/fzf"; chmod +x "$TMP_ROOT/bin/fzf"
+"$BIN" --internal-nav pick "$cl" >/dev/null 2>&1
+rm -f "$TMP_ROOT/bin/fzf"
+assert_contains "The agent picker lists assistants first, starred" "★ tp-guia" "$(head -n 1 "$TMP_ROOT/rows")"
+tmux -L "$USER_SOCKET" send-keys -t =op: M-o
+assert_true "Alt+o takes the operator to the assistant" "wait_for 8 \"$P list-clients -F '#{client_session}' | grep -qx tp-guia\""
+assert_eq "…and the status bar stops calling" "" "$($P show-options -gqv @prama_assist)"
+sleep 1.1; tmux -L "$USER_SOCKET" send-keys -t =op: 'hola'; sleep 0.5
+out=$(PRAMA_SESSION=tp-aco "$BIN" bus assign tp-guia "revisa esto" 2>&1)
+assert_contains "A message to an assistant the operator is talking to waits in its queue" "está hablando con" "$out"
+sleep 0.5
+assert_not_contains "…nothing is typed over the operator" "revisa esto" "$($P capture-pane -p -t '=tp-guia:' -S -60)"
+assert_eq "…it stays queued for later" "1" "$(st tp-guia .queue)"
+out=$(PRAMA_SESSION=tp-aco "$BIN" logs tp-guia 20 2>&1); rc=$?
+assert_true "Other agents cannot read an assistant's screen (the operator may type secrets)" "[ $rc -ne 0 ] && [[ \"\$out\" == *privado* ]]"
+assert_true "…the operator can" "$BIN capture tp-guia 5 >/dev/null 2>&1"
+PRAMA_SESSION=tp-aco "$BIN" plan alpha --team asis add "Acompañar al operador" >/dev/null 2>&1
+PRAMA_SESSION=tp-aco "$BIN" plan alpha --team asis start T1 --owner tp-guia >/dev/null 2>&1
+assert_not_contains "A task an assistant holds is never 'stale' (it waits for the operator)" "stale" \
+  "$(PRAMA_PLAN_STALE_MIN=0 "$BIN" plan alpha --team asis json | jq -r '.tasks[0].flags')"
+"$BIN" fleet edit tp-guia --model haiku >/dev/null 2>&1
+wait_for 8 "$P capture-pane -p -J -t '=tp-guia:' -S -600 | grep -q -- '\[--model\] \[haiku\]'"
+assert_eq "A restarted assistant keeps its brief" "2" "$($P capture-pane -p -J -t '=tp-guia:' -S -600 | grep -c 'Guía del CLI de backend.')"
+tmux -L "$USER_SOCKET" kill-session -t =op 2>/dev/null
+"$BIN" stop --all -y >/dev/null 2>&1
+
 section "UI engine"
 out=$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; str_width "ab"; echo; str_width "🤝 ab"; echo; str_width "✦ x"')
 assert_eq "Display width counts emoji as 2 columns" $'2\n5\n3' "$out"

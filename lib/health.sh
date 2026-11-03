@@ -395,7 +395,7 @@ watchdog_tick() {
         state_set "$s" SENT_TS=   # submitted, or not prama's to submit any more
       fi
       W_READY[$s]=$(( ${W_READY[$s]:-0} + 1 ))
-      if (( W_READY[$s] >= 2 )) && (( $(queue_len "$s") > 0 )); then
+      if (( W_READY[$s] >= 2 )) && (( $(queue_len "$s") > 0 )) && ! bus_operator_engaged "$s"; then
         local task
         if task=$(queue_pop "$s"); then
           [[ "$task" == \[* ]] || _tv task '[QUEUED TASK]: %s' "$task"
@@ -417,6 +417,14 @@ watchdog_tick() {
   for s in "${!W_PREV[@]}"; do
     [ -n "${seen[$s]:-}" ] || unset 'W_PREV[$s]' 'W_READY[$s]'
   done
+  # The assistant the status bar calls the operator to: gone, or already found by them.
+  local wa
+  wa=$(tmx show-options -gqv @prama_assist 2>/dev/null)
+  if [ -n "$wa" ]; then
+    if ! tmx_has "$wa" || session_human_active "$wa" 0; then
+      tmx set-option -gu @prama_assist 2>/dev/null
+    fi
+  fi
   _watch_quota_alerts
   _watch_plans
 }

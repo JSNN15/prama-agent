@@ -23,6 +23,7 @@ PRAMA_TMUX_SOCKET="${PRAMA_TMUX_SOCKET:-prama}"         # dedicated tmux server 
 PRAMA_MENU_KEY="${PRAMA_MENU_KEY:-M-m}"                 # key that detaches back to the menu
 PRAMA_NAV_KEY="${PRAMA_NAV_KEY:-M-a}"                   # agent picker popup
 PRAMA_COCKPIT_KEY="${PRAMA_COCKPIT_KEY:-M-c}"           # team cockpit ⇄ agent
+PRAMA_ASSIST_KEY="${PRAMA_ASSIST_KEY:-M-o}"             # jump to the assistant waiting for you
 PRAMA_COMPACT_COLS="${PRAMA_COMPACT_COLS:-100}"         # narrower clients (phones) get the compact layout
 # Language and theme from the environment win over config.env (PRAMA_LANG=en prama-agent help).
 PRAMA_LANG_ENV=${PRAMA_LANG:-} PRAMA_THEME_ENV=${PRAMA_THEME:-}
@@ -504,7 +505,7 @@ ensure_tmux_conf() {
   local force=${1:-0}
   # The theme and the language are part of the generated file: changing either regenerates it.
   # So are the keys, the compact width and prama's own path (the bindings call it back).
-  local style="# style: theme=${UI_THEME:-midnight} lang=${PRAMA_UI_LANG:-en} keys=$PRAMA_MENU_KEY,$PRAMA_NAV_KEY,$PRAMA_COCKPIT_KEY cols=${PRAMA_COMPACT_COLS:-100} self=${SELF_PATH:-prama-agent}"
+  local style="# style: theme=${UI_THEME:-midnight} lang=${PRAMA_UI_LANG:-en} keys=$PRAMA_MENU_KEY,$PRAMA_NAV_KEY,$PRAMA_COCKPIT_KEY,$PRAMA_ASSIST_KEY cols=${PRAMA_COMPACT_COLS:-100} self=${SELF_PATH:-prama-agent}"
   if (( force )) || [ ! -f "$PRAMA_TMUX_CONF" ] || ! grep -q "$TMUX_CONF_VERSION" "$PRAMA_TMUX_CONF" 2>/dev/null \
      || ! grep -qxF "$style" "$PRAMA_TMUX_CONF" 2>/dev/null \
      || ! grep -q "bind -n $PRAMA_MENU_KEY " "$PRAMA_TMUX_CONF" 2>/dev/null; then
@@ -535,6 +536,14 @@ ensure_tmux_conf() {
     # Cockpit panes are nested clients (TERM tmux*): they get a bare status line, the buttons
     # belong to the outer client only.
     status_left="#{?#{m:tmux*,#{client_termname}},,$left_btns}"
+    # An assistant waiting for the operator: "★ <name>", a tap (or the key) jumps to it.
+    local assist_btn
+    if tmux_at_least 3 3; then
+      assist_btn="#[range=user|assist]#[bg=$OK#,fg=$H#,bold] ★ #{=14:@prama_assist} #[norange]#[default] "
+    else
+      assist_btn="#[bg=$OK#,fg=$H#,bold] ★ #{=14:@prama_assist} #[default] "
+    fi
+    status_left+="#{?#{m:tmux*,#{client_termname}},,#{?#{@prama_assist},$assist_btn,}}"
     # In a hook, #{client_name} can be another client (the cockpit's nested viewers): use the
     # client that fired it (#{hook_client}, tmux ≥ 3.3); fit re-checks its session and width.
     local fit_hooks=''
@@ -589,13 +598,14 @@ set-environment -gu PRAMA_SL_CACHE
 set-environment -gu IS_SANDBOX
 
 # Navigation (works inside agents and the cockpit; the agent keeps running):
-#   $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent picker · $PRAMA_COCKPIT_KEY team cockpit ⇄ agent
+#   $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent picker · $PRAMA_COCKPIT_KEY team cockpit ⇄ agent · $PRAMA_ASSIST_KEY assistant waiting
 #   prefix n / p: next / previous agent · prefix z: zoom the focused cockpit pane
 bind -n $PRAMA_MENU_KEY detach-client
 bind m detach-client
 # (display-popup does not expand #{client_name} in its command: run-shell does, then opens the popup)
 bind -n $PRAMA_NAV_KEY run-shell -b "$nav click '#{client_name}' '#{session_name}' agents"
 bind -n $PRAMA_COCKPIT_KEY run-shell -b "$nav cockpit '#{client_name}' '#{session_name}'"
+bind -n $PRAMA_ASSIST_KEY run-shell -b "$nav assist '#{client_name}' '#{session_name}'"
 bind n run-shell -b "$nav next '#{client_name}' '#{session_name}'"
 bind p run-shell -b "$nav prev '#{client_name}' '#{session_name}'"
 # Status bar buttons (tap in Termius or click): ◂ MENU · ☰ AGENTES · ▦ COCKPIT
@@ -615,7 +625,7 @@ set -g pane-active-border-style "fg=$A"
 set -g status-interval 5
 set -g status-style "bg=$H,fg=$T"
 set -g status-left "$status_left"
-set -g status-left-length 60
+set -g status-left-length 90
 set -g status-right "$status_right"
 set -g status-right-length 60
 set -g window-status-format ""
@@ -661,7 +671,7 @@ state_get() {
 state_remove() {
   local f
   f=$(state_file "$1")
-  rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md} "$f.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock" 2>/dev/null || true
+  rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md,brief} "$f.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock" 2>/dev/null || true
 }
 
 # state_set <session> KEY=VALUE...   (merge: replaces only the given keys, atomic, serialized)
@@ -746,7 +756,7 @@ state_gc() {
   for f in "$PRAMA_BUS_DIR"/state/*.env; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .env)
-    tmx_has "$s" || rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md} "$f.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock"
+    tmx_has "$s" || rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md,brief} "$f.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock"
   done
 }
 

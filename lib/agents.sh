@@ -29,7 +29,8 @@ valid_model() { [[ "$1" =~ $MODEL_RE ]]; }
 #                 agy --conversation on restarts (id reported by its hooks)
 #   AGENT_RESUME  1 = continue the previous conversation (restart in place)
 #   PRESET        preset name (see preset_load); its flags are appended
-AGENT_MODEL='' AGENT_EFFORT='' AGENT_SID='' AGENT_RESUME=0 PRESET=''
+#   BRIEF         an assistant's brief (who it helps, with what, what it may touch)
+AGENT_MODEL='' AGENT_EFFORT='' AGENT_SID='' AGENT_RESUME=0 PRESET='' BRIEF=''
 [ -n "${PASS+x}" ] || PASS=()
 
 # compose_session_cmd <session> → rebuilds CMD for an existing session from its saved spec
@@ -504,13 +505,19 @@ launch_agent() {
   elif [ "$role" = coordinator ]; then
     team=${PRAMA_TEAM:-}
   fi
+  # An assistant's brief is kept beside its state: its role prompt is rebuilt from it on restarts.
+  local bf; bf=$(assistant_brief_file "$name")
+  rm -f "$bf"
+  if [ "$role" = assistant ] && [ -n "${BRIEF:-}" ]; then
+    ( umask 077; printf '%s\n' "${BRIEF:0:8000}" > "$bf" )
+  fi
   local role_prompt=""
   # A plain executor gets no prompt (it is your own agent); one launched into a team learns the
   # bus, its coordinator and, in an isolated team, its branch.
   if role_wants_prompt "$role" "$parent"; then
     local tbase=${PRAMA_TEAM_BASE:-} tiso=${PRAMA_TEAM_ISOLATE:-0}
     if [ -n "$tcoord" ]; then tbase=$(state_get "$tcoord" BASE "$tbase") tiso=$(state_get "$tcoord" ISOLATE 0); fi
-    role_prompt=$(TEAM_HINT=$team PRAMA_WT_BRANCH=$wt PRAMA_WT_DIR=$target_d PRAMA_TEAM_BASE=$tbase PRAMA_TEAM_ISOLATE=$tiso \
+    role_prompt=$(TEAM_HINT=$team PARENT_HINT=$parent PRAMA_WT_BRANCH=$wt PRAMA_WT_DIR=$target_d PRAMA_TEAM_BASE=$tbase PRAMA_TEAM_ISOLATE=$tiso \
       build_role_system_prompt "$role" "$name" "$zone")
   fi
   # A known conversation id lets prama restart the agent in place (new model, preset…) and
@@ -550,6 +557,8 @@ launch_agent() {
   if (( ${#PASS[@]} )); then printf '%s\0' "${PASS[@]}" > "$(state_args_file "$name")"; fi
   bus_event started "${PRAMA_SESSION:-operator}" "$name" "$agent@$zone ($role, $perm${AGENT_MODEL:+, $AGENT_MODEL}${PRESET:+, preset $PRESET})"
   watchdog_ensure || true
+  # An assistant is for the operator: tell them it is there (status bar, a message, Telegram).
+  if [ "$role" = assistant ] && declare -F assistant_announce >/dev/null; then assistant_announce "$name" || true; fi
 
   case "$mode" in
     porcelain) printf '%s\n' "$name" ;;

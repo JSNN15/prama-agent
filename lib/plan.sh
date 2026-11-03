@@ -162,7 +162,8 @@ _plan_flags() {
       last=${P_updated[i]:-0}
       act=$(_plan_activity "${P_owner[i]}")
       (( act > last )) && last=$act
-      (( PL_NOW - last >= PRAMA_PLAN_STALE_MIN * 60 )) && PF+=' stale'
+      # An assistant waits for the operator: silence is not staleness.
+      (( PL_NOW - last >= PRAMA_PLAN_STALE_MIN * 60 )) && [ "$(session_role "${P_owner[i]}")" != assistant ] && PF+=' stale'
       [ -n "${P_owner[i]}" ] && ! tmx_has "${P_owner[i]}" && PF+=' orphan'
       if [ -n "${P_scope[i]}" ]; then
         for j in "${!P_id[@]}"; do

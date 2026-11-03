@@ -80,4 +80,5 @@ I18N+=(
   ['near the limit (%s)']='cerca del límite (%s)'
   ['quota not known yet']='cuota aún desconocida'
   ['Isolated team: %s works on its own branch %s.']='Equipo aislado: %s trabaja en su propia rama %s.'
+  ['--brief requires a text (what the assistant helps the operator with)']='--brief requiere un texto (con qué ayuda el asistente al operador)'
 )

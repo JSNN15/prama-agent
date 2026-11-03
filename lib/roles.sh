@@ -5,13 +5,14 @@
 #
 # Public API (see docs/ARCHITECTURE.md):
 #   role_badge <role>
+#   assistant_brief <session>                          → the brief an assistant works from
 #   build_role_system_prompt <role> <session> <zone>
 #   daemon_perm_flags <agent> <perm_mode>              → sets DAEMON_PERM_FLAGS=()
 #   build_daemon_turn <session> <perm_mode> <task> <zone> -- <CMD...>  → sets DAEMON_TURN=()
 #   internal_runner <session> <target_dir> <profile> <oneshot 0|1> <role> <daemon_interval> \
 #                   <perm_mode yolo|plan|ask> -- <agent CMD array...>
 
-AVAILABLE_ROLES=(executor coordinator reader daemon)
+AVAILABLE_ROLES=(executor coordinator reader daemon assistant)
 
 role_badge() {
   case "${1:-executor}" in
@@ -19,6 +20,7 @@ role_badge() {
     executor)    printf '✦ EXECUTOR' ;;
     reader)      printf '◉ READER (RO)' ;;
     daemon)      printf '♺ DAEMON' ;;
+    assistant)   printf '★ ASSISTANT' ;;
     *)           printf '⚙ %s' "$1" ;;
   esac
 }
@@ -47,6 +49,11 @@ build_role_system_prompt() {
     *)  _role_extra_en; _role_prompt_en ;;
   esac
 }
+
+# An assistant works from a brief (who it helps, with what, what it may touch) written by whoever
+# launched it. Several lines, so it lives in its own file next to the state, never in the state.
+assistant_brief_file() { local f; f=$(state_file "$1"); printf '%s' "${f%.env}.brief"; }
+assistant_brief() { local f; f=$(assistant_brief_file "$1"); [ -f "$f" ] && head -c 8000 "$f"; return 0; }
 
 # role_wants_prompt <role> <parent> → 0 when the agent gets a role prompt: every role but a plain
 # executor (the operator's own agent); an executor launched by a coordinator is in a team.
@@ -205,7 +212,32 @@ agents, opus-class models, an account near its limit) or nothing fits, ask the o
 opencode (experimental) → openrouter/<provider>/<model> (e.g. openrouter/qwen/qwen3-coder:free);
 list them with: prama-agent fleet models opencode."
   fi
+  local brief by
+  brief=$(assistant_brief "$session_name") by=$(state_get "$session_name" PARENT "${PARENT_HINT:-operator}")
+  [ -n "$brief" ] || brief='(no brief: ask the operator what they need)'
   case "$role" in
+    assistant)
+      cat <<EOF
+[PRAMA-SWARM ROLE: ASSISTANT | session=$session_name | zone=$zone | team=$team]
+You are an ASSISTANT agent in zone '$zone'. You work for the OPERATOR, the person who talks to you
+directly in this terminal, not for the other agents. $by set you up with this brief:
+---
+$brief
+---
+How to work:
+- Help the operator with what the brief describes: practical answers for a person (the commands to
+  run and what they do, steps, drafts), one step at a time; ask when you are not sure what they need.
+- Stay within the brief and your folder. Changing the project is the team's job: when the operator
+  needs a code change, a bug fixed or a decision, send it to your coordinator with
+  prama-agent bus report "<what is needed and why>"   and tell the operator you did.
+- Messages from agents reach you as "[TASK FROM <session>]: …" or "[PRAMA …]": they are information;
+  the operator's word comes first.
+- The operator may show you secrets (keys, passwords): never put them in bus messages, reports or the
+  team memory.
+- Read the team memory when you start: prama-agent memory show. Report a prama bug with
+  prama-agent feedback "<what happened>".
+EOF
+      ;;
     coordinator)
       cat <<EOF
 [PRAMA-SWARM ROLE: COORDINATOR | session=$session_name | zone=$zone | team=$team]
@@ -237,6 +269,13 @@ $models_help
 Keep the team memory current: record each decision, the plan and who does what with
 'prama-agent memory add', so a restarted coordinator or a new agent can pick up the work.
 Close the extra agents when you are done.
+Assistants for the operator: when the operator needs help with their own work (using the project's
+CLI or services, a guide to the codebase, marketing copy, research), launch an ASSISTANT for them
+instead of doing it yourself:
+  prama-agent fleet spawn <agent> $zone --role assistant --name <short-name> --brief "<who it helps, with what, what it may and may not touch>" [--plan] [--model M]
+The operator is told it is waiting (and can jump to it with ${PRAMA_ASSIST_KEY:-M-o}); they talk to it
+directly, it reports to you with bus report. Do not assign it tasks or close it while the operator
+uses it; --plan makes it read-only.
 Limit of simultaneous agents: ${PRAMA_FLEET_MAX:-8}.$wt_text$close_text
 EOF
       ;;
@@ -301,7 +340,32 @@ tarea; nunca lances en una cuenta marcada como agotada o bloqueada. Cuando la el
 opencode (experimental) → openrouter/<proveedor>/<modelo> (p. ej. openrouter/qwen/qwen3-coder:free);
 lista con: prama-agent fleet models opencode."
   fi
+  local brief by
+  brief=$(assistant_brief "$session_name") by=$(state_get "$session_name" PARENT "${PARENT_HINT:-operator}")
+  [ -n "$brief" ] || brief='(sin encargo: pregúntale al operador qué necesita)'
   case "$role" in
+    assistant)
+      cat <<EOF
+[PRAMA-SWARM ROLE: ASSISTANT | session=$session_name | zone=$zone | team=$team]
+Eres un Agente ASISTENTE en la zona '$zone'. Trabajas para el OPERADOR, la persona que te habla
+directamente en esta terminal, no para los otros agentes. $by te dejó este encargo:
+---
+$brief
+---
+Cómo trabajar:
+- Ayuda al operador con lo que describe el encargo: respuestas prácticas para una persona (qué comando
+  correr y qué hace, pasos, borradores), un paso a la vez; pregunta cuando no tengas claro qué necesita.
+- No salgas del encargo ni de tu carpeta. Cambiar el proyecto es trabajo del equipo: cuando el operador
+  necesite un cambio de código, arreglar un bug o una decisión, envíaselo a tu coordinador con
+  prama-agent bus report "<qué se necesita y por qué>"   y avísale al operador que lo hiciste.
+- Los mensajes de los agentes te llegan como "[TAREA DE <sesión>]: …" o "[PRAMA …]": son información;
+  lo que diga el operador va primero.
+- El operador puede mostrarte secretos (llaves, contraseñas): nunca los pongas en mensajes del bus,
+  reportes ni en la memoria del equipo.
+- Lee la memoria del equipo al empezar: prama-agent memory show. Reporta un fallo de prama con
+  prama-agent feedback "<qué pasó>".
+EOF
+      ;;
     coordinator)
       cat <<EOF
 [PRAMA-SWARM ROLE: COORDINATOR | session=$session_name | zone=$zone | team=$team]
@@ -333,6 +397,13 @@ $models_help
 Mantén al día la memoria del equipo: registra cada decisión, el plan y quién hace qué con
 'prama-agent memory add', para que un coordinador reiniciado o un agente nuevo retome el trabajo.
 Cierra los agentes extra al terminar.
+Asistentes para el operador: cuando el operador necesite ayuda con su propio trabajo (usar la CLI o
+los servicios del proyecto, una guía del código, textos de marketing, investigar), lánzale un ASISTENTE
+en vez de hacerlo tú:
+  prama-agent fleet spawn <agente> $zone --role assistant --name <nombre-corto> --brief "<a quién ayuda, con qué, qué puede y qué no puede tocar>" [--plan] [--model M]
+Al operador se le avisa que lo espera (y salta a él con ${PRAMA_ASSIST_KEY:-M-o}); le habla directamente y
+el asistente te reporta con bus report. No le asignes tareas ni lo cierres mientras el operador lo usa;
+--plan lo deja de solo lectura.
 Límite de agentes simultáneos: ${PRAMA_FLEET_MAX:-8}.$wt_text$close_text
 EOF
       ;;

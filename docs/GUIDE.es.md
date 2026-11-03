@@ -7,7 +7,7 @@ Todo lo que hace prama-agent, una sección por tema. ¿Primera vez? Empieza por
 (en inglés).
 
 - [La interfaz interactiva](#la-interfaz-interactiva)
-- [Equipos y cockpit](#equipos-y-cockpit) · [equipos aislados](#equipos-aislados-una-rama-por-agente) · [memoria del equipo](#memoria-del-equipo)
+- [Equipos y cockpit](#equipos-y-cockpit) · [equipos aislados](#equipos-aislados-una-rama-por-agente) · [asistentes](#asistentes-agentes-que-trabajan-para-ti) · [memoria del equipo](#memoria-del-equipo)
 - [El plan en vivo](#el-plan-en-vivo)
 - [Desde el celular](#desde-el-celular) · [Telegram](#telegram-control-desde-el-celular)
 - [Administración de la flota](#administración-de-la-flota) · [salud y cuota](#cómo-se-obtienen-la-salud-y-la-cuota)
@@ -82,6 +82,7 @@ Dentro del tmux de prama, desde cualquier agente o desde el cockpit:
 | `Alt+m` | `◂ MENU` | volver al menú (los agentes siguen trabajando) |
 | `Alt+a` | `☰ AGENTES` | lista de agentes (equipos, estado, modelo, cuota): ir a cualquiera o a un cockpit |
 | `Alt+c` | `▦ COCKPIT` | cockpit del equipo ⇄ el agente con el foco |
+| `Alt+o` | `★ <nombre>` | el [asistente](#asistentes-agentes-que-trabajan-para-ti) que te espera |
 | `Ctrl+b n` / `Ctrl+b p` | `▶` / `◀` (celular) | agente siguiente / anterior; dentro del cockpit, el panel siguiente / anterior |
 | `Ctrl+b z` | | agrandar el panel con el foco en el cockpit |
 
@@ -119,6 +120,36 @@ prama-agent worktree sync prama-backend-seg-agy-2           # pone una rama al d
   vez de reinstalarlos; si no, los ejecutores instalan lo que necesiten.
 - En el menú, el asistente de nuevo equipo pregunta *una rama por agente* o *carpeta compartida*, y
   **Equipos → Ramas** muestra el estado de cada rama; en Telegram, equipo → **⎇ Ramas**.
+
+### Asistentes: agentes que trabajan para ti
+
+Los ejecutores trabajan para el coordinador. Un **asistente** trabaja para ti: el coordinador (o tú) lo
+lanza con un encargo y tú le hablas directamente mientras el equipo sigue construyendo. Una guía del
+código, ayuda para usar la CLI o los servicios del proyecto, textos de marketing, investigar: el
+coordinador decide qué tipos necesita el trabajo.
+
+```bash
+# lo que corre un coordinador (o tú)
+prama-agent fleet spawn claude backend --role assistant --name guia \
+  --brief "Ayuda al operador a correr y depurar la CLI del backend. Solo lectura: los cambios van al coordinador." --plan
+```
+
+- **Se te avisa, no se te mueve la pantalla.** La barra de estado muestra `★ guia` (tócalo o pulsa
+  `Alt+o`), cada terminal conectada a prama recibe un mensaje y Telegram una notificación con
+  **💬 Hablar**. Las teclas que escribes en un agente nunca deben caer en otro, así que prama no te
+  cambia la pantalla por su cuenta; `PRAMA_ASSIST_OPEN=switch` lo hace si llevas `PRAMA_ASSIST_IDLE`
+  segundos (60) sin teclear. La lista de agentes (`Alt+a`) muestra primero a los asistentes, con ★.
+- **Su encargo es su prompt de sistema** (Claude; agy lo recibe como primer mensaje) y se guarda junto a
+  su estado: reinicios y cambios de modelo lo conservan. Sabe que trabaja para ti, no sale de su encargo
+  ni de su carpeta, y lo que necesita al equipo (un cambio de código, un bug, una decisión) se lo envía
+  al coordinador con `bus report`, que lo convierte en tareas.
+- **Nadie escribe encima de ti.** Mientras escribes en un agente (conectado o desde el cockpit), los
+  mensajes del bus para él esperan en su cola: `PRAMA_HUMAN_HOLD` segundos después de tu última tecla
+  (20), o `PRAMA_ASSIST_HOLD` (180) para un asistente. El watchdog los entrega después.
+- **Lo que escribes ahí es tuyo.** Los otros agentes no pueden leer la pantalla de un asistente con
+  `logs` / `capture` (podrías pegarle una llave); `PRAMA_ASSIST_PRIVATE=0` lo permite.
+- Una tarea del plan en manos de un asistente nunca se marca como estancada: te está esperando. `--plan`
+  deja al asistente en solo lectura; `--worktree <rama>` le da su propia rama a uno que escribe código.
 
 ### Memoria del equipo
 
@@ -307,6 +338,7 @@ encadena.
 | `❖ coordinator` | planifica, delega con `bus assign` y administra la flota |
 | `◉ reader` | revisor de solo lectura (plan mode) |
 | `♺ daemon` | procesa una cola de tareas en bucle (`--loop 60 --task "…"`) |
+| `★ assistant` | trabaja para ti: le hablas tú y reporta a su coordinador (`--brief "…"`, ver [asistentes](#asistentes-agentes-que-trabajan-para-ti)) |
 
 ```bash
 prama-agent bus assign prama-agy-backend-2 "Implementa /health y corre pytest"
@@ -458,7 +490,10 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_SWARM_WORKERS` | `agy:2` | ejecutores por defecto de `swarm` (`auto`: elige el coordinador; `ask`: primero te propone) |
 | `PRAMA_SEND_DELAY` | `0.3` | pausa entre pegar un mensaje en un agente y presionar Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | cuánto tiempo `fleet agents` muestra bloqueada una cuenta tras un 429 (s) |
-| `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` | `M-m` / `M-a` / `M-c` | teclas de navegación en tmux |
+| `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` / `PRAMA_ASSIST_KEY` | `M-m` / `M-a` / `M-c` / `M-o` | teclas de navegación en tmux |
+| `PRAMA_HUMAN_HOLD` / `PRAMA_ASSIST_HOLD` | `20` / `180` | segundos que esperan los mensajes del bus después de que escribes en un agente / un asistente |
+| `PRAMA_ASSIST_OPEN` / `PRAMA_ASSIST_IDLE` | `notify` / `60` | `switch`: lleva a un operador inactivo (segundos sin teclear) al asistente nuevo |
+| `PRAMA_ASSIST_PRIVATE` | `1` | `0` deja que otros agentes lean la pantalla de un asistente |
 | `PRAMA_COMPACT_COLS` | `100` | clientes más angostos reciben el modo celular |
 | `PRAMA_FEEDBACK_MAX_OPEN` | `50` | reportes abiertos antes de pedir a los agentes que esperen |
 | `PRAMA_SWARM_ISOLATE` | `1` | equipos nuevos en una zona git: un worktree y una rama por ejecutor |
