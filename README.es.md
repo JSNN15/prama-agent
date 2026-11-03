@@ -73,14 +73,8 @@ cubren unas 270 comprobaciones de punta a punta sobre un servidor tmux aislado, 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JSNN15/prama-agent/main/install.sh | sudo bash
-prama-agent demo             # pruébalo primero: agentes simulados en un sandbox, sin cuenta ni tokens
 prama-agent setup            # primeros pasos: acceso de los agentes, zonas (espacios de trabajo), permisos
 ```
-
-`prama-agent demo` arma un equipo desechable con su propio servidor tmux, estado y repositorio git: el
-coordinador simulado planifica y delega, los ejecutores hacen commit en sus propias ramas y reportan,
-los merges corren los tests y un asistente te espera. No se toca nada real; `prama-agent demo stop`
-lo borra.
 
 Necesitas bash ≥ 4.4, tmux ≥ 3.2 y git, más al menos un CLI de agentes con sesión iniciada (`claude` o
 `agy`). Las credenciales quedan en cada CLI. Se recomiendan `jq`, `fzf` y `less`, y el puente de

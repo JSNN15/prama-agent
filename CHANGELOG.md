@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.10.1] - 2026-11-03
+
+### Removed
+- `prama-agent demo` (added in 6.10.0) and `lib/demo.sh`: code the project does not need. The README
+  demo and its generator (`make demo`, `tools/demo.sh`) are a different thing and stay.
+
 ## [6.10.0] - 2026-11-03
 
 ### Added
