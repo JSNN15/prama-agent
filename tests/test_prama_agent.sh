@@ -966,6 +966,15 @@ printf 'HEALTH=blocked\nREASON=auth\nDETAIL=401\nTS=%s\n' "$(date +%s)" > "$STAT
 assert_eq "A block reported by hooks wins over 'Working' text on screen" "BLOCKED" "$(st tp-wb .state)"
 "$BIN" bus broadcast "hola equipo" >/dev/null 2>&1
 assert_eq "A broadcast is queued for a blocked agent (delivered when it recovers)" "1" "$(st tp-wb .queue)"
+mock_ctl tp-hu interactive; mock_ctl tp-hu screen "❯ [Pasted text #1 +1 lines]"; "$BIN" claude alpha --bg --name tp-hu >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-hu:' | grep -q 'Pasted text'"
+tmux -L "$USER_SOCKET" new-session -d -s hu -x 120 -y 30 "env -u TMUX tmux -L $PRAMA_TMUX_SOCKET attach-session -t =tp-hu"
+wait_for 5 "$P list-clients -F '#{client_session}' | grep -qx tp-hu"
+bash -c "$LIBS"'; PRAMA_SEND_DELAY=0 tmx_send tp-hu "hola"'
+sleep 1.2; tmux -L "$USER_SOCKET" send-keys -t =hu: 'x'; sleep 0.5
+"$BIN" fleet watchdog tick >/dev/null 2>&1; sleep 0.3
+assert_not_contains "The watchdog never presses Enter while the operator types in the agent" "GOT: x" "$($P capture-pane -p -t '=tp-hu:' -S -40)"
+tmux -L "$USER_SOCKET" kill-session -t =hu 2>/dev/null
 ln -s "$TMP_ROOT/nowhere" "$TMP_ROOT/statelink"
 out=$(printf '{}' | PRAMA_STATE_HOME="$TMP_ROOT/statelink" "$BIN" --internal-hook claude; echo "rc=$?")
 assert_eq "A hook exits 0 even when prama cannot start (unsafe state dir)" "rc=0" "$out"
