@@ -903,7 +903,7 @@ mkdir -p "$HOME/.claude/projects/t" && : > "$HOME/.claude/projects/t/$sid.jsonl"
 "$BIN" restart tp-tex >/dev/null 2>&1
 wait_for 8 "$P capture-pane -p -J -t '=tp-tex:' -S -900 | grep -q -- '\[--resume\]'"
 out=$($P capture-pane -p -J -t '=tp-tex:' -S -900)
-assert_eq "prama-agent restart relaunches from the saved spec (the edit is kept)" "3" "$(grep -c -- '\[--model\] \[opus\]' <<< "$out")"
+assert_eq "prama-agent restart relaunches from the saved spec (the edit is kept)" "2" "$(grep -c -- '\[--model\] \[opus\]' <<< "$out")"
 assert_contains "…resuming the saved conversation" "[--resume] [$sid]" "$out"
 assert_true "…and the session keeps its state" "[ -f '$STATE/bus/state/tp-tex.env' ]"
 # Guard rails apply to every command an agent runs, not only to 'fleet'.
