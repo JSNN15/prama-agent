@@ -51,4 +51,5 @@ I18N+=(
   ['Cancelled.']='Cancelado.'
   ['Bus event log and queues cleared.']='Registro de eventos y colas del bus vaciados.'
   ['No live '\''%s'\'' you can reach (your team, or your zone outside teams).']='No hay un '\''%s'\'' vivo a tu alcance (tu equipo, o tu zona fuera de los equipos).'
+  ['The operator is talking to '\''%s'\''; the task waits in its queue and is delivered afterwards.']='El operador está hablando con '\''%s'\''; la tarea espera en su cola y se entrega después.'
 )

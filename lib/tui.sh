@@ -331,6 +331,7 @@ _tui_state_label() {
 _tui_role_icon() {
   case $1 in
     coordinator) UI_S='❖' ;;
+    assistant)   UI_S='★' ;;
     reader)      UI_S='◉' ;;
     daemon)      UI_S='♺' ;;
     *)           UI_S='✦' ;;
@@ -340,6 +341,7 @@ _tui_role_icon() {
 _tui_role_short() {
   case $1 in
     coordinator) UI_S='❖ coord' ;;
+    assistant)   UI_S='★ asist' ;;
     reader)      UI_S='◉ read' ;;
     daemon)      UI_S='♺ daem' ;;
     executor)    UI_S='✦ exec' ;;
@@ -350,6 +352,7 @@ _tui_role_short() {
 _tui_role_color() {
   case $1 in
     coordinator) UI_C=$C_PURP ;;
+    assistant)   UI_C=$C_LIVE ;;
     reader)      UI_C=$C_NEON ;;
     daemon)      UI_C=$C_BRASS ;;
     *)           UI_C=$C_INDIGO ;;
@@ -359,6 +362,7 @@ _tui_role_color() {
 _tui_role_desc() {
   case $1 in
     coordinator) _tv UI_S 'plans and hands out work' ;;
+    assistant)   _tv UI_S 'works for you: you talk to it, it reports to the team' ;;
     reader)      _tv UI_S 'read-only (forces PLAN)' ;;
     daemon)      _tv UI_S 'works through its queue in a loop' ;;
     *)           _tv UI_S 'carries out tasks' ;;
@@ -742,6 +746,7 @@ _tui_help_entries() {
   _hk "$mk" 'back to this menu (◂ MENU)'
   _hk "$nk" 'agent list (☰)'
   _hk "$ck" 'team cockpit ⇄ agent (▦)'
+  _tui_key_label "$PRAMA_ASSIST_KEY"; _hk "$UI_S" 'the assistant waiting for you (★)'
   _hk 'Ctrl+b n/p' 'next / previous agent'
   _hk 'Ctrl+b z' 'zoom the focused pane'
   _hs 'MORE'

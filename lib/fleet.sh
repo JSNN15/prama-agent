@@ -152,7 +152,7 @@ _fleet_spawn() {
   local a_exp=0 r_exp=0 p_exp=0 perm_exp=0
   (( ${PRAMA_SKIP_PERMISSIONS:-0} )) && perm=yolo
   local pass=()
-  AGENT_MODEL='' AGENT_EFFORT='' PRESET=''
+  AGENT_MODEL='' AGENT_EFFORT='' PRESET='' BRIEF=''
   while (( $# )); do
     arg=$1
     case "$arg" in
@@ -164,6 +164,7 @@ _fleet_spawn() {
       --name|-n)    name=${2:?$(_t '--name requires a name')}; shift 2 ;;
       --worktree|-w) wt=${2:?$(_t '--worktree requires a branch')}; shift 2 ;;
       --task)       task=${2:?$(_t '--task requires an instruction')}; shift 2 ;;
+      --brief)      BRIEF=${2:?$(_t '--brief requires a text (what the assistant helps the operator with)')}; shift 2 ;;
       --yolo)       perm=yolo; perm_exp=1; shift ;;
       --ask)        perm=ask; perm_exp=1; shift ;;
       --plan)       perm=plan; perm_exp=1; shift ;;

@@ -5,7 +5,7 @@
 
 set -u
 
-VERSION="6.8.1"
+VERSION="6.9.0"
 
 # Status line fast path: agy redraws it several times per second, so the last line is reused
 # for PRAMA_SL_MIN seconds with bash builtins only (no forks, before anything else runs).
@@ -135,7 +135,8 @@ ${C_BOLD}USAGE${C_OFF}
   prama-agent <subcommand> [args]
 
 ${C_BOLD}LAUNCH${C_OFF}  agents: ${AGENTS[*]}  ·  zones: ${ZONES[*]}
-  --role, -O <role>      executor | coordinator | reader | daemon
+  --role, -O <role>      executor | coordinator | reader | daemon | assistant
+  --brief "<text>"       an assistant's brief: who it helps, with what, what it may touch
   --ask | --plan | --yolo  permissions (default: $1)
   --remote | --no-remote   native Remote Control (claude/agy)
   --model, -m <model>    claude: opus|sonnet|haiku…  agy: prama-agent fleet models agy
@@ -169,7 +170,7 @@ ${C_BOLD}TEAMS${C_OFF}
   bus status|assign|report|inbox|broadcast|watch|clear|help            Messages between agents
   memory [show|add|clear] [<zone>|<session>] [--team T] [--zone-wide]   Team and zone memory (survives restarts)
   plan [board|timeline|add|start|done|verify|replan|log|watch|html] [<zone>|<session>] [--team T]   The team's live plan
-  Inside tmux: $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent list · $PRAMA_COCKPIT_KEY cockpit ⇄ agent · Ctrl+b n/p next
+  Inside tmux: $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent list · $PRAMA_COCKPIT_KEY cockpit ⇄ agent · $PRAMA_ASSIST_KEY assistant waiting · Ctrl+b n/p next
 
 ${C_BOLD}SYSTEM${C_OFF}
   worktree list|create|remove|prune   profiles   mcp   agents [--json]
@@ -196,7 +197,8 @@ ${C_BOLD}USO${C_OFF}
   prama-agent <subcomando> [args]
 
 ${C_BOLD}LANZAR${C_OFF}  agentes: ${AGENTS[*]}  ·  zonas: ${ZONES[*]}
-  --role, -O <rol>       executor | coordinator | reader | daemon
+  --role, -O <rol>       executor | coordinator | reader | daemon | assistant
+  --brief "<texto>"      encargo de un asistente: a quién ayuda, con qué, qué puede tocar
   --ask | --plan | --yolo  permisos (por defecto: $1)
   --remote | --no-remote   Remote Control nativo (claude/agy)
   --model, -m <modelo>   claude: opus|sonnet|haiku…  agy: prama-agent fleet models agy
@@ -230,7 +232,7 @@ ${C_BOLD}EQUIPOS${C_OFF}
   bus status|assign|report|inbox|broadcast|watch|clear|help            Mensajes entre agentes
   memory [show|add|clear] [<zona>|<sesión>] [--team T] [--zone-wide]   Memoria del equipo y la zona (sobrevive reinicios)
   plan [board|timeline|add|start|done|verify|replan|log|watch|html] [<zona>|<sesión>] [--team T]   El plan vivo del equipo
-  Dentro de tmux: $PRAMA_MENU_KEY menú · $PRAMA_NAV_KEY lista de agentes · $PRAMA_COCKPIT_KEY cockpit ⇄ agente · Ctrl+b n/p siguiente
+  Dentro de tmux: $PRAMA_MENU_KEY menú · $PRAMA_NAV_KEY lista de agentes · $PRAMA_COCKPIT_KEY cockpit ⇄ agente · $PRAMA_ASSIST_KEY asistente que te espera · Ctrl+b n/p siguiente
 
 ${C_BOLD}SISTEMA${C_OFF}
   worktree list|create|remove|prune   profiles   mcp   agents [--json]
@@ -443,9 +445,19 @@ subcmd_restart() {
   _fleet_restart "${1:-}"
 }
 
+# What the operator types into an assistant is theirs (it can hold secrets): other agents do not
+# read its screen unless PRAMA_ASSIST_PRIVATE=0.
+_assistant_private() {
+  [ -n "${PRAMA_SESSION:-}" ] && [ "$1" != "$PRAMA_SESSION" ] && [ "$(session_role "$1")" = assistant ] \
+    && [ "${PRAMA_ASSIST_PRIVATE:-1}" != 0 ] \
+    && die "$(_t "'%s' is the operator's assistant: what they type there is private (PRAMA_ASSIST_PRIVATE=0 lets agents read it)." "$1")"
+  return 0
+}
+
 subcmd_logs() {
   local target=${1:-} lines=${2:-80}
   require_session "$target"
+  _assistant_private "$target"
   [[ "$lines" =~ ^[0-9]+$ ]] || die "$(_t 'N must be a number.')"
   refresh_dimensions
   if (( IS_TTY )) && command -v less >/dev/null 2>&1 && (( lines > ${ROWS:-24} )); then
@@ -460,6 +472,7 @@ subcmd_logs() {
 subcmd_capture() {
   local lines=${2:-40}
   require_session "${1:-}"
+  _assistant_private "$1"
   [[ "$lines" =~ ^[0-9]+$ ]] || die "$(_t 'N must be a number.')"
   tmx_capture "$1" "$lines" 0
 }
@@ -715,7 +728,7 @@ _prama_agent() {
   local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]} first=${COMP_WORDS[1]:-}
   local subs="status ls sessions attach logs capture send restart stop fleet swarm teams bus cockpit fzf worktree profiles mcp zones agents telegram feedback memory plan setup login lang theme doctor update completion info help"
   case "$prev" in
-    --role|-O) COMPREPLY=($(compgen -W "executor coordinator reader daemon" -- "$cur")); return ;;
+    --role|-O) COMPREPLY=($(compgen -W "executor coordinator reader daemon assistant" -- "$cur")); return ;;
     --profile|-P) COMPREPLY=($(compgen -W "default openrouter deepseek glm local" -- "$cur")); return ;;
     --model|-m) COMPREPLY=($(compgen -W "opus sonnet haiku fable openrouter/qwen/qwen3-coder:free openrouter/moonshotai/kimi-k2 openrouter/z-ai/glm-4.6 openrouter/deepseek/deepseek-chat" -- "$cur")); return ;;
     --effort) COMPREPLY=($(compgen -W "low medium high xhigh max" -- "$cur")); return ;;
@@ -864,6 +877,9 @@ while [ $# -gt 0 ]; do
     --task)
       need_arg $# "$(_t '--task requires an instruction')"
       DAEMON_TASK=$2; shift 2 ;;
+    --brief)
+      need_arg $# "$(_t '--brief requires a text (what the assistant helps the operator with)')"
+      BRIEF=$2; shift 2 ;;
     --name|-n)
       need_arg $# "$(_t '--name requires a session name')"
       valid_session_name "$2" || die "$(_t "Invalid name '%s': use letters, digits, - and _ (max. 48)." "$2")"

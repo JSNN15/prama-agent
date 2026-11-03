@@ -162,12 +162,14 @@ _tg_alert_buttons() {
     alert) printf '[[{"text":"%s","callback_data":"p:%s"},{"text":"%s","callback_data":"t:%s"}],[{"text":"%s","callback_data":"r:%s"}]]' \
              "$v" "$s" "$t" "$s" "$r" "$s" ;;
     team)  printf '[[{"text":"%s","callback_data":"T:%s"},{"text":"%s","callback_data":"t:%s"}]]' "$tm" "$s" "$t" "$s" ;;
+    assistant) printf '[[{"text":"%s","callback_data":"t:%s"},{"text":"%s","callback_data":"p:%s"}]]' "$t" "$s" "$v" "$s" ;;
     *)     printf '[[{"text":"%s","callback_data":"p:%s"},{"text":"%s","callback_data":"t:%s"}]]' "$v" "$s" "$t" "$s" ;;
   esac
 }
 
 # Sends a push notification to the paired chat. Non-blocking; silent no-op if not configured.
-# telegram_notify <text> [kind] [session] — kind: info (bus traffic) | report | team | alert.
+# telegram_notify <text> [kind] [session] — kind: info (bus traffic) | report | team | alert |
+# assistant (one is waiting for the operator: passes the "alerts" level too).
 # With a session, the message carries buttons to act on it from the phone.
 telegram_notify() {
   local text=${1:-} kind=${2:-info} s=${3:-} level silent=0 kb=''
@@ -177,7 +179,7 @@ telegram_notify() {
   level=$(tg_notify_level)
   case $level in
     off)       return 0 ;;
-    alerts)    [ "$kind" = alert ] || return 0 ;;
+    alerts)    [ "$kind" = alert ] || [ "$kind" = assistant ] || return 0 ;;
     important) [ "$kind" = info ] && return 0 ;;
   esac
   (( $(tg_mute_until) > ${EPOCHSECONDS:-$(date +%s)} )) && silent=1

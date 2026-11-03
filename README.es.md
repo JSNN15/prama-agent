@@ -33,16 +33,20 @@ diriges la flota desde la terminal, la CLI o Telegram.
 
 Un agente coordinador planifica el trabajo en un [plan en vivo](docs/GUIDE.es.md#el-plan-en-vivo) que
 ves sin tener que preguntarle, y administra a sus ejecutores: los lanza, les cambia el modelo y los
-reinicia, dentro de [ciertos límites](docs/GUIDE.es.md#administración-de-la-flota).
+reinicia, dentro de [ciertos límites](docs/GUIDE.es.md#administración-de-la-flota). Puede elegir él
+mismo a sus ejecutores (agente y modelo según la tarea, el costo y la cuota que le queda a cada cuenta)
+y lanzarte [asistentes](docs/GUIDE.es.md#asistentes-agentes-que-trabajan-para-ti): agentes con un
+encargo a los que les hablas directamente (una guía del código, ayuda con la CLI del proyecto, textos
+de marketing) mientras el equipo sigue construyendo.
 
 ## Cómo se compara
 
-Contrastado con la documentación de cada proyecto el 2026-11-01; las correcciones son bienvenidas.
+Contrastado con la documentación de cada proyecto en noviembre de 2026; las correcciones son bienvenidas.
 
 | | prama-agent | [Claude Squad](https://github.com/smtg-ai/claude-squad) | [Agent of Empires](https://github.com/agent-of-empires/agent-of-empires) | [Gas Town](https://github.com/gastownhall/gastown) | [Equipos de agentes de Claude Code](https://code.claude.com/docs/en/agent-teams) |
 | --- | --- | --- | --- | --- | --- |
 | Corre en tu servidor, sobrevive a cortes de SSH | ✓ | ✓ | ✓ | ✓ | dentro de una sesión de Claude Code (experimental) |
-| CLIs de agentes | Claude Code, agy | Claude, Codex, Gemini, Aider, cualquiera | 8+ | 11 presets | solo Claude |
+| CLIs de agentes | Claude Code, agy; OpenCode (experimental) | Claude, Codex, Gemini, Aider, cualquiera | 8+ | 11 presets | solo Claude |
 | Una rama de git por agente | ✓ con merge condicionado a tests | ✓ | ✓ y contenedores | ✓ con cola de merges | por subagente, opcional |
 | Agentes bloqueados y por qué | hooks del CLI + pantalla | pantalla | hooks + pantalla | registro + agentes vigilantes | hooks nativos |
 | Cuota de 5 h / semanal | ✓ alerta al 90 % | — | no documentado | — | ✓ |

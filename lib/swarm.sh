@@ -523,6 +523,7 @@ nav_main() {
   case "$action" in
     pick)    _nav_pick "$client" ;;
     cockpit) _nav_cockpit "$client" "$cur" ;;
+    assist)  _nav_assist "$client" ;;
     next)    _nav_cycle "$client" "$cur" 1 ;;
     prev)    _nav_cycle "$client" "$cur" -1 ;;
     fit)     _nav_fit "$client" "$cur" ;;
@@ -530,6 +531,7 @@ nav_main() {
       case "${4:-}" in
         agents)  _nav_popup "$client" ;;
         cockpit) _nav_cockpit "$client" "$cur" ;;
+        assist)  _nav_assist "$client" ;;
         next)    _nav_cycle "$client" "$cur" 1 ;;
         prev)    _nav_cycle "$client" "$cur" -1 ;;
         *)       tmx detach-client -c "$client" 2>/dev/null ;;
@@ -547,7 +549,67 @@ _nav_popup() {
   tmx display-popup -c "$1" -E -w 92% -h 75% ${title[@]+"${title[@]}"} "$nav" 2>/dev/null
 }
 
-_nav_switch() { tmx switch-client -c "$1" -t "=$2" 2>/dev/null; }
+_nav_switch() {
+  tmx switch-client -c "$1" -t "=$2" 2>/dev/null || return 1
+  assistant_seen "$2"
+  return 0
+}
+
+# ── Assistants: agents that work for the operator ──────────────────────────
+# A coordinator (or the operator) launches an assistant with a brief; the operator talks to it
+# directly. prama tells the operator it is waiting and never moves their screen by itself, unless
+# PRAMA_ASSIST_OPEN=switch and they have been idle for PRAMA_ASSIST_IDLE seconds: keys typed in one
+# agent must not land in another.
+
+# assistant_announce <session> — "★ <name>" in the status bar (a tap or PRAMA_ASSIST_KEY opens it),
+# a message on every operator client, and a Telegram notification with [Talk].
+assistant_announce() {
+  local s=$1 by msg key cl term act now
+  by=$(state_get "$s" PARENT operator)
+  tmx set-option -g @prama_assist "$s" 2>/dev/null
+  key=${PRAMA_ASSIST_KEY//M-/Alt+}; key=${key//C-/Ctrl+}
+  _tv msg '★ %s is ready for you (from %s) · %s opens it' "$s" "$by" "$key"
+  now=${EPOCHSECONDS:-$(date +%s)}
+  while IFS='|' read -r cl term act; do
+    [ -n "$cl" ] || continue
+    [[ "$term" == tmux* ]] && continue   # the cockpit's viewers
+    tmx display-message -c "$cl" -d 10000 "$msg" 2>/dev/null || tmx display-message -c "$cl" "$msg" 2>/dev/null
+    if [ "${PRAMA_ASSIST_OPEN:-notify}" = switch ] && [[ "$act" =~ ^[0-9]+$ ]] \
+       && (( now - act >= ${PRAMA_ASSIST_IDLE:-60} )); then
+      _nav_switch "$cl" "$s"
+    fi
+  done < <(tmx list-clients -F '#{client_name}|#{client_termname}|#{client_activity}' 2>/dev/null)
+  bus_event assistant "$by" "$s" "$(assistant_brief "$s" | head -n 1)"
+  declare -F telegram_notify >/dev/null && telegram_notify "$msg" assistant "$s" >/dev/null 2>&1
+  return 0
+}
+
+# assistant_seen <session> — the operator reached the assistant: the status bar stops calling.
+assistant_seen() {
+  [ -n "${1:-}" ] && [ "$(tmx show-options -gqv @prama_assist 2>/dev/null)" = "$1" ] \
+    && tmx set-option -gu @prama_assist 2>/dev/null
+  return 0
+}
+
+# assistants_live → the live assistants, newest first
+assistants_live() {
+  local s
+  while IFS= read -r s; do
+    [ "$(session_role "$s")" = assistant ] && printf '%s %s\n' "$(state_get "$s" STARTED_AT)" "$s"
+  done < <(prama_sessions) | sort -r | cut -d' ' -f2
+}
+
+# The key and the ★ button: the assistant that called, else the newest one.
+_nav_assist() {
+  local client=$1 s m
+  s=$(tmx show-options -gqv @prama_assist 2>/dev/null)
+  { [ -n "$s" ] && tmx_has "$s"; } || s=$(assistants_live | head -n 1)
+  if [ -z "$s" ]; then
+    tmx set-option -gu @prama_assist 2>/dev/null
+    _tv m 'No assistant is waiting for you.'; tmx display-message -c "$client" "$m" 2>/dev/null; return 0
+  fi
+  _nav_switch "$client" "$s"
+}
 
 # Inside a cockpit, the "current" agent is the one in the focused pane.
 _nav_current_agent() {
@@ -638,7 +700,7 @@ _nav_cycle() {
 # Agent picker shown in a tmux popup: teams, state, model and quota at a glance.
 _nav_pick() {
   local client=$1 s depth zone st role agent model q line choice target='' i
-  local -a rows=() targets=() zones_seen=()
+  local -a rows=() targets=() zones_seen=() arows=() atargets=()
   local -A zseen=()
   while IFS='|' read -r s depth zone; do
     st=$(bus_session_state "$s")
@@ -647,8 +709,15 @@ _nav_pick() {
     q=$(quota_label "$s")
     if [ -z "${zseen[$zone]:-}" ]; then zseen[$zone]=1; zones_seen+=("$zone"); fi
     printf -v line '%-10s %s%-34s %-8s %-11s %s' "$zone" "$( (( depth )) && printf '└ ' || printf '')" "$s" "$st" "$agent·${role:0:5}" "${model:-—}${q:+  ◔ $q}"
-    rows+=("$line"); targets+=("$s")
+    # Assistants work for the operator: listed first, starred.
+    if [ "$role" = assistant ]; then
+      printf -v line '★ %-34s %-8s %-11s %s' "$s" "$st" "$agent" "$zone"
+      arows+=("$line"); atargets+=("$s")
+    else
+      rows+=("$line"); targets+=("$s")
+    fi
   done < <(prama_team_order)
+  rows=(${arows[@]+"${arows[@]}"} ${rows[@]+"${rows[@]}"}) targets=(${atargets[@]+"${atargets[@]}"} ${targets[@]+"${targets[@]}"})
   local c n
   for zone in ${zones_seen[@]+"${zones_seen[@]}"}; do
     n=0

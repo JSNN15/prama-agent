@@ -6,7 +6,7 @@ Everything prama-agent does, one section per topic. New here? Start with
 [Getting started](GETTING_STARTED.md). Design decisions and their trade-offs: [ADRs](adr/README.md).
 
 - [The interactive menu](#the-interactive-menu)
-- [Teams and the cockpit](#teams-and-the-cockpit) · [isolated teams](#isolated-teams-a-branch-per-agent) · [team memory](#team-memory)
+- [Teams and the cockpit](#teams-and-the-cockpit) · [isolated teams](#isolated-teams-a-branch-per-agent) · [assistants](#assistants-agents-that-work-for-you) · [team memory](#team-memory)
 - [The live plan](#the-live-plan)
 - [On your phone](#on-your-phone) · [Telegram](#telegram-control-from-your-phone)
 - [Fleet management](#fleet-management) · [health and quota](#how-health-and-quota-are-collected)
@@ -80,6 +80,7 @@ prama's tmux, from any agent or from the cockpit:
 | `Alt+m` | `◂ MENU` | back to the menu (agents keep running) |
 | `Alt+a` | `☰ AGENTS` | agent list (teams, state, model, quota): jump to any agent or cockpit |
 | `Alt+c` | `▦ COCKPIT` | team cockpit ⇄ the agent in focus |
+| `Alt+o` | `★ <name>` | the [assistant](#assistants-agents-that-work-for-you) waiting for you |
 | `Ctrl+b n` / `Ctrl+b p` | `▶` / `◀` (phone) | next / previous agent; inside the cockpit, the next / previous pane |
 | `Ctrl+b z` | | zoom the focused cockpit pane |
 
@@ -116,6 +117,36 @@ prama-agent worktree sync prama-backend-sec-agy-2           # bring a branch up 
   of reinstalling them; otherwise executors install what they need.
 - In the menu, the new-team wizard asks *a branch per agent* or *shared folder*, and **Teams →
   Branches** shows the state of every branch; in Telegram, team → **⎇ Branches**.
+
+### Assistants: agents that work for you
+
+Executors work for the coordinator. An **assistant** works for you: the coordinator (or you) launches
+it with a brief, and you talk to it directly while the team goes on building. A guide to the
+codebase, help using the project's CLI or services, marketing copy, research: the coordinator decides
+which kinds the work needs.
+
+```bash
+# what a coordinator runs (or you)
+prama-agent fleet spawn claude backend --role assistant --name guia \
+  --brief "Help the operator run and debug the backend's CLI. Read-only: changes go to the coordinator." --plan
+```
+
+- **You are told, your screen is not moved.** The status bar shows `★ guia` (tap it, or press
+  `Alt+o`), every terminal attached to prama gets a message, and Telegram a notification with
+  **💬 Talk**. Keys typed in one agent must never land in another, so prama does not switch your
+  screen by itself; `PRAMA_ASSIST_OPEN=switch` does it when you have been idle for
+  `PRAMA_ASSIST_IDLE` seconds (60). The agent list (`Alt+a`) shows assistants first, starred.
+- **Its brief is its system prompt** (Claude; agy gets it as its first message), kept beside its state:
+  restarts and model changes keep it. It knows it works for you, stays within its brief and its
+  folder, and sends what needs the team (a code change, a bug, a decision) to the coordinator with
+  `bus report`, which the coordinator turns into tasks.
+- **Nobody types over you.** While you are typing in an agent (attached or from the cockpit), bus
+  messages to it wait in its queue: `PRAMA_HUMAN_HOLD` seconds after your last key (20), or
+  `PRAMA_ASSIST_HOLD` (180) for an assistant. The watchdog delivers them afterwards.
+- **What you type there is yours.** Other agents cannot read an assistant's screen with `logs` /
+  `capture` (you might paste a key into it); `PRAMA_ASSIST_PRIVATE=0` allows it.
+- A plan task an assistant holds is never flagged stale: it waits for you. `--plan` makes an assistant
+  read-only; `--worktree <branch>` gives one that writes code its own branch.
 
 ### Team memory
 
@@ -297,6 +328,7 @@ picker). If you already use a custom Claude Code status line, prama chains it.
 | `❖ coordinator` | plans, delegates with `bus assign`, manages the fleet |
 | `◉ reader` | read-only reviewer (plan mode) |
 | `♺ daemon` | works through a task queue in a loop (`--loop 60 --task "…"`) |
+| `★ assistant` | works for you: you talk to it, it reports to its coordinator (`--brief "…"`, see [assistants](#assistants-agents-that-work-for-you)) |
 
 ```bash
 prama-agent bus assign prama-agy-backend-2 "Implement /health and run pytest"
@@ -440,7 +472,10 @@ the menu, the tmux status bar of every agent and the fzf inspector. Both are als
 | `PRAMA_SWARM_WORKERS` | `agy:2` | default workers for `swarm` (`auto`: the coordinator picks; `ask`: it proposes first) |
 | `PRAMA_SEND_DELAY` | `0.3` | pause between pasting a message into an agent and pressing Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | how long `fleet agents` reports an account blocked by a 429 (s) |
-| `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` | `M-m` / `M-a` / `M-c` | navigation keys inside tmux |
+| `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` / `PRAMA_ASSIST_KEY` | `M-m` / `M-a` / `M-c` / `M-o` | navigation keys inside tmux |
+| `PRAMA_HUMAN_HOLD` / `PRAMA_ASSIST_HOLD` | `20` / `180` | seconds bus messages wait after you type in an agent / an assistant |
+| `PRAMA_ASSIST_OPEN` / `PRAMA_ASSIST_IDLE` | `notify` / `60` | `switch`: take an idle operator (seconds without typing) to a new assistant |
+| `PRAMA_ASSIST_PRIVATE` | `1` | `0` lets other agents read an assistant's screen |
 | `PRAMA_COMPACT_COLS` | `100` | clients narrower than this get the phone layout |
 | `PRAMA_FEEDBACK_MAX_OPEN` | `50` | open bug reports before agents are asked to wait |
 | `PRAMA_SWARM_ISOLATE` | `1` | new teams in a git zone: a worktree and branch per executor |

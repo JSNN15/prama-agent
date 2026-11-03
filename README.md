@@ -33,16 +33,20 @@ or Telegram.
 
 A coordinator agent plans the work in a [live plan](docs/GUIDE.md#the-live-plan) that you can watch
 without asking it, and manages its own executors: it spawns them, switches their models and restarts
-them, within [guard rails](docs/GUIDE.md#fleet-management).
+them, within [guard rails](docs/GUIDE.md#fleet-management). It can pick its executors itself (agent
+and model by task, cost and the quota each account has left), and it can launch
+[assistants](docs/GUIDE.md#assistants-agents-that-work-for-you) for you: agents with a brief that you
+talk to directly (a guide to the codebase, help with the project's CLI, marketing copy) while the team
+goes on building.
 
 ## How it compares
 
-Checked against each project's own documentation on 2026-11-01; corrections are welcome.
+Checked against each project's own documentation in November 2026; corrections are welcome.
 
 | | prama-agent | [Claude Squad](https://github.com/smtg-ai/claude-squad) | [Agent of Empires](https://github.com/agent-of-empires/agent-of-empires) | [Gas Town](https://github.com/gastownhall/gastown) | [Claude Code agent teams](https://code.claude.com/docs/en/agent-teams) |
 | --- | --- | --- | --- | --- | --- |
 | Runs on your server, survives SSH drops | ✓ | ✓ | ✓ | ✓ | inside one Claude Code session (experimental) |
-| Agent CLIs | Claude Code, agy | Claude, Codex, Gemini, Aider, any | 8+ | 11 presets | Claude only |
+| Agent CLIs | Claude Code, agy; OpenCode (experimental) | Claude, Codex, Gemini, Aider, any | 8+ | 11 presets | Claude only |
 | A git branch per agent | ✓ with test-gated merge | ✓ | ✓ plus containers | ✓ with a merge queue | per subagent, opt-in |
 | Blocked agents and why | CLI hooks + screen | screen | hooks + screen | ledger + watchdog agents | native hooks |
 | 5 h / weekly quota | ✓ alert at 90 % | — | not documented | — | ✓ |

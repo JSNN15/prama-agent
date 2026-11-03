@@ -158,4 +158,6 @@ I18N+=(
   ['Policy: yolo %s · profiles %s · merges %s · Telegram screens %s']='Política: yolo %s · perfiles %s · merge %s · pantallas TG %s'
   ['Your user is in the '\''%s'\'' group: agents can get root. See docs/HARDENING.md.']='Tu usuario está en el grupo '\''%s'\'': los agentes pueden obtener root. Ver docs/HARDENING.es.md.'
   ['Only the operator can stop every agent; an agent closes its own with '\''prama-agent fleet kill <session>'\''.']='Solo el operador puede detener a todos los agentes; un agente cierra los suyos con '\''prama-agent fleet kill <sesión>'\''.'
+  ['--brief requires a text (what the assistant helps the operator with)']='--brief requiere un texto (con qué ayuda el asistente al operador)'
+  [''\''%s'\'' is the operator'\''s assistant: what they type there is private (PRAMA_ASSIST_PRIVATE=0 lets agents read it).']=''\''%s'\'' es el asistente del operador: lo que escribe ahí es privado (PRAMA_ASSIST_PRIVATE=0 deja que los agentes lo lean).'
 )

@@ -51,7 +51,8 @@ creates private dirs).
    and again by the runner on every restart). `IS_SANDBOX=1` is exported only for yolo as root.
 8. Functions that can fail inside `$(...)` must be followed by `|| exit 1` / `|| return 1` — `die`
    only exits the subshell.
-9. **Never type into an agent that is not READY/WORKING** (`bus_can_inject`, which reads the pane's
+9. **Never type into an agent that is not READY/WORKING, nor over the operator** (`bus_can_inject`:
+   it holds messages while a human typed in the session lately, `bus_operator_engaged`; it reads the pane's
    command: a supervisor dropped to a plain shell is SHELL); BLOCKED agents get a queue. `tmx_send`
    types text only (control characters become spaces) and queued text carries its real sender.
    Because a wrong BLOCKED stops an agent's queue, screen detection is conservative: typed messages are
@@ -102,6 +103,10 @@ creates private dirs).
     pass-through arguments; a yolo *default* is lowered instead (`perm_cap_default`). `fleet edit --perm`
     applies the same ceiling. Provider profiles outside `PRAMA_PROFILES` are refused in
     `apply_provider_profile`, which every launch and restart goes through.
+
+22. **Assistants are the operator's.** prama never moves the operator's screen by itself (unless
+    `PRAMA_ASSIST_OPEN=switch` and the operator is idle), and other agents cannot read an assistant's
+    screen (`_assistant_private`). Its brief lives in `<session>.brief`, never in the state file.
 
 ## core.sh API
 
