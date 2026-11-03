@@ -71,8 +71,14 @@ when a rewrite would make sense, are in [ADR-0001](docs/adr/0001-bash-and-tmux.m
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JSNN15/prama-agent/main/install.sh | sudo bash
+prama-agent demo             # try it first: simulated agents in a sandbox, no account, no tokens
 prama-agent setup            # first steps: agent sign-in, zones (workspaces), permissions
 ```
+
+`prama-agent demo` builds a throwaway team on its own tmux server, state and git repository: the
+simulated coordinator plans and delegates, the executors commit on their own branches and report, the
+merges run the tests, and an assistant waits for you. Nothing real is touched; `prama-agent demo stop`
+deletes it.
 
 You need bash ≥ 4.4, tmux ≥ 3.2 and git, plus at least one signed-in agent CLI (`claude` or `agy`).
 Credentials stay with each CLI. `jq`, `fzf` and `less` are recommended, and the Telegram bridge needs

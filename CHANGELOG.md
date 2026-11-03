@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.10.0] - 2026-11-03
+
+### Added
+- **`prama-agent demo`**: try prama in a minute with no account and no tokens. A sandbox with its own
+  tmux server, state, HOME and git repository runs simulated agents through the real prama commands:
+  the coordinator plans and delegates, the executors commit on their own branches and report, the
+  merges run the tests, the plan closes with evidence and an assistant waits for you. Nothing real is
+  touched (the host's config, `~/.claude`, `~/.gemini`, the live fleet); `demo stop` deletes it.
+- **Agent types of a team**: the coordinator saves the kinds of agents its work needs (a code
+  executor, a guide to the project's CLI, a marketing assistant…) with
+  `fleet type add <name> --role assistant|executor|reader --agent A [--model M] [--plan] --brief "…"`
+  and launches them with `fleet spawn --type <name> [--brief "…"]`; the operator sees them with
+  `fleet type list`. Types are data in the team's private state and hold no tools, MCP servers or
+  skills, and nothing above ask.
+
 ## [6.9.0] - 2026-11-03
 
 ### Added

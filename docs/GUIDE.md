@@ -147,6 +147,18 @@ prama-agent fleet spawn claude backend --role assistant --name guia \
   `capture` (you might paste a key into it); `PRAMA_ASSIST_PRIVATE=0` allows it.
 - A plan task an assistant holds is never flagged stale: it waits for you. `--plan` makes an assistant
   read-only; `--worktree <branch>` gives one that writes code its own branch.
+- **Agent types.** The coordinator decides which kinds of agents its work needs and saves each once,
+  then launches it by name; you see them with `prama-agent fleet type list --zone <zone> --team <team>`:
+
+  ```bash
+  prama-agent fleet type add cli-guide --role assistant --agent claude --model sonnet --plan \
+    --brief "Help the operator use the backend's CLI; changes go to the coordinator."
+  prama-agent fleet spawn --type cli-guide --name guia --brief "Today: the deploy commands"
+  ```
+
+  A type holds a role (`assistant`, `executor`, `reader`), an agent, a model and effort, read-only or
+  not, and a brief; it lives in the team's private state and holds no tools, MCP servers or skills
+  (presets, which you write, can).
 
 ### Team memory
 
