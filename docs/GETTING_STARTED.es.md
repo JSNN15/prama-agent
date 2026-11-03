@@ -23,10 +23,6 @@ curl -fsSL https://raw.githubusercontent.com/JSNN15/prama-agent/main/install.sh 
 curl -fsSL https://raw.githubusercontent.com/JSNN15/prama-agent/main/install.sh | bash        # solo para tu usuario
 ```
 
-Antes de iniciar sesión en nada puedes ver a un equipo trabajar: `prama-agent demo` corre agentes
-simulados en un sandbox (su propio servidor tmux, estado y repositorio; sin cuenta ni tokens), y
-`prama-agent demo stop` lo borra.
-
 ## 3. Ejecuta el asistente
 
 ```bash

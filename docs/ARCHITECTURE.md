@@ -19,7 +19,6 @@ Internal design reference for contributors (English only). User documentation:
 | `lib/fleet.sh` | `prama-agent fleet …`: spawn/kill/model/edit/restart with guard rails |
 | `lib/feedback.sh` | `prama-agent feedback …`: bug reports from agents and the operator (local, redacted, deduplicated) |
 | `lib/worktrees.sh` | Isolated teams: worker branches (`prama/<team>/<name>`), `worktree status/merge/sync/clean` |
-| `lib/demo.sh` | `prama-agent demo`: a sandbox (own tmux server, state, HOME, repository) with simulated agents |
 | `lib/plan.sh` | `prama-agent plan …`: team plans (tasks, revisions, history), board, timeline, HTML, honesty checks |
 | `lib/memory.sh` | `prama-agent memory …`: shared team / zone notes (`$PRAMA_STATE_HOME/memory`) |
 | `lib/prefs.sh` | `lang` and `theme`: apply, save (`_config_set`) and reload the tmux config |
@@ -28,7 +27,7 @@ Internal design reference for contributors (English only). User documentation:
 | `lib/tui.sh` | Interactive full-screen TUI |
 
 Source order: `core.sh` → `ui.sh` → `agents.sh` → `roles.sh` → `bus.sh` → `swarm.sh` → `worktrees.sh` → `plan.sh` → `health.sh` → `fleet.sh` →
-`feedback.sh` → `memory.sh` → `setup.sh` → `prefs.sh` → `telegram.sh` → `tui.sh` → `demo.sh` (`core.sh` sources `i18n.sh`). `--internal-hook` and `--internal-statusline` are fast paths that only source
+`feedback.sh` → `memory.sh` → `setup.sh` → `prefs.sh` → `telegram.sh` → `tui.sh` (`core.sh` sources `i18n.sh`). `--internal-hook` and `--internal-statusline` are fast paths that only source
 `core.sh` + `health.sh`; outside prama panes the hook exits before sourcing anything (agy's hooks are
 global), and the status line reuses its last output for `PRAMA_SL_MIN` seconds using bash builtins only
 (agy redraws it several times per second).
