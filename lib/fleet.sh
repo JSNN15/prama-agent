@@ -485,6 +485,7 @@ ${C_BOLD}prama-agent fleet${C_OFF} — fleet management (for humans and coordina
   edit <session> --model/--effort/--preset/--profile/--perm …
   restart <session>                       relaunches the agent, keeping the conversation
   kill <session>                          closes the agent
+  restore [<session>|--all|--json]        brings back sessions that ended, with their conversation
   agents [--json]                         agents you can launch, each account's quota and a cost hint
   type [list|add|rm] <name> …             the team's agent types: --role assistant|executor|reader --agent A
                                           [--model M] [--plan] --brief "…"; launch one with spawn --type <name>
@@ -510,6 +511,7 @@ ${C_BOLD}prama-agent fleet${C_OFF} — gestión de la flota (para humanos y coor
   edit <sesión> --model/--effort/--preset/--profile/--perm …
   restart <sesión>                        relanza el agente conservando la conversación
   kill <sesión>                           cierra el agente
+  restore [<sesión>|--all|--json]         trae de vuelta sesiones que terminaron, con su conversación
   agents [--json]                         agentes que se pueden lanzar, cuota de cada cuenta y costo
   type [list|add|rm] <nombre> …           los tipos de agente del equipo: --role assistant|executor|reader --agent A
                                           [--model M] [--plan] --brief "…"; lanza uno con spawn --type <nombre>
@@ -521,6 +523,143 @@ ${C_BOLD}prama-agent fleet${C_OFF} — gestión de la flota (para humanos y coor
 Desde un agente (PRAMA_SESSION definido) no se puede actuar sobre uno mismo ni sobre un coordinador,
 y solo dentro de PRAMA_FLEET_SCOPE=${PRAMA_FLEET_SCOPE:-zone}. Máximo ${PRAMA_FLEET_MAX:-8} agentes vivos.
 EOF
+}
+
+# ── Restore: sessions that ended, back with their conversation ──────────────
+# restore                 what can come back (--json)
+# restore <session>       one of them, closed or not: same spec, same folder, same conversation
+# restore --all           the ones that ended without anyone closing them, coordinators first
+_fleet_restore() {
+  case ${1:-} in
+    ''|list|ls)  _fleet_restore_list ;;
+    --json)      _fleet_restore_list --json ;;
+    --all|-a)    _fleet_restore_all ;;
+    -h|--help|help) printf '%s\n' "$(_t 'Usage: prama-agent restore [<session>|--all|--json]')" ;;
+    -*)          die "$(_t 'Usage: prama-agent restore [<session>|--all|--json]')" ;;
+    *)           _fleet_restore_one "$1" ;;
+  esac
+}
+
+_fleet_restore_list() {
+  local ts s reason l sep='' n=0 spec
+  closed_prune
+  [ "${1:-}" = --json ] && printf '['
+  [ "${1:-}" = --json ] || printf ' %s%s%s\n' "$C_BOLD" "$(_t 'Sessions you can bring back (prama-agent restore <session>):')" "$C_OFF"
+  while IFS='|' read -r ts s reason; do
+    [ -n "$s" ] || continue
+    spec="$(closed_dir "$s")/spec.env" n=$(( n + 1 ))
+    if [ "${1:-}" = --json ]; then
+      printf '%s{"session":"%s","reason":"%s","closed":%d,"role":"%s","agent":"%s","zone":"%s","team":"%s"}' "$sep" \
+        "$s" "$reason" "$ts" "$(_kv_get "$spec" ROLE)" "$(_kv_get "$spec" AGENT)" \
+        "$(json_escape "$(_kv_get "$spec" ZONE)")" "$(_kv_get "$spec" TEAM)"
+      sep=','
+    else
+      case $reason in
+        closed) _tv l 'closed' ;;
+        exited) _tv l 'finished' ;;
+        *)      l="$C_BRASS$(_t 'ended by itself')$C_OFF" ;;
+      esac
+      printf '  %-34s %-18s %s · %s · %(%m-%d %H:%M)T\n' "$s" "$(role_badge "$(_kv_get "$spec" ROLE)")" \
+        "$(_kv_get "$spec" AGENT)@$(_kv_get "$spec" ZONE)" "$l" "$ts"
+    fi
+  done < <(closed_rows)
+  if [ "${1:-}" = --json ]; then printf ']\n'
+  elif (( n == 0 )); then printf '  %s\n' "$(_t '(none)')"; fi
+  return 0
+}
+
+_fleet_restore_all() {
+  local s reason n=0 failed=0 pass
+  local -a first=() rest=()
+  while IFS='|' read -r _ s reason; do
+    [ "$reason" = vanished ] && [ -n "$s" ] || continue
+    if [ "$(_kv_get "$(closed_dir "$s")/spec.env" ROLE)" = coordinator ]; then first+=("$s"); else rest+=("$s"); fi
+  done < <(closed_rows)
+  # Coordinators first: their agents rejoin them. Each one in a subshell: one that fails is reported
+  # and does not stop the others.
+  for pass in ${first[@]+"${first[@]}"} ${rest[@]+"${rest[@]}"}; do
+    if ( _fleet_restore_one "$pass" ); then n=$(( n + 1 )); else failed=$(( failed + 1 )); fi
+  done
+  (( n + failed )) || info_msg "$(_t 'Nothing to bring back: no session ended by itself.')"
+  (( failed == 0 ))
+}
+
+_fleet_restore_one() {
+  local s=$1 d spec role agent zone perm remote profile wt parent team iso base obj sid caller=${PRAMA_SESSION:-} out pid
+  valid_session_name "$s" || die "$(_t "Invalid name: '%s'" "$s")"
+  d=$(closed_dir "$s") spec="$d/spec.env"
+  [ -f "$spec" ] || die "$(_t "Nothing saved for '%s' (prama-agent restore lists what can come back)." "$s")"
+  tmx_has "$s" && die "$(_t "'%s' is already running." "$s")"
+  role=$(_kv_get "$spec" ROLE executor) agent=$(_kv_get "$spec" AGENT claude) zone=$(_kv_get "$spec" ZONE)
+  perm=$(_kv_get "$spec" PERM ask) remote=$(_kv_get "$spec" REMOTE 0) profile=$(_kv_get "$spec" PROFILE default)
+  wt=$(_kv_get "$spec" WORKTREE) parent=$(_kv_get "$spec" PARENT operator) team=$(_kv_get "$spec" TEAM)
+  iso=$(_kv_get "$spec" ISOLATE) base=$(_kv_get "$spec" BASE) obj=$(_kv_get "$spec" OBJECTIVE)
+  [ "$role" = daemon ] && die "$(_t "'%s' is a daemon: its task and interval are not saved, launch it again." "$s")"
+  # What was saved is data that ends up on a command line: checked like any other input.
+  is_in "$agent" "${AGENTS[@]}" || die "$(_t "Agent not available: '%s'" "$agent")"
+  is_in "$role" "${AVAILABLE_ROLES[@]}" || die "$(_t "Invalid role: '%s'" "$role")"
+  valid_session_name "$parent" || [ "$parent" = operator ] || die "$(_t "Invalid name: '%s'" "$parent")"
+  [ -z "$team" ] || valid_team_name "$team" || die "$(_t 'Invalid team name: %s' "$team")"
+  # An agent brings back only an agent it launched itself, never a coordinator.
+  if [ -n "$caller" ] && [ -f "$(state_file "$caller")" ]; then
+    [ "$role" != coordinator ] || die "$(_t 'An agent cannot launch another coordinator.')"
+    [ "$parent" = "$caller" ] || die "$(_t "'%s' was not launched by you: ask the operator." "$s")"
+  fi
+  # Its coordinator first: without it the agent would come back outside its team, with no role prompt.
+  if [ "$parent" != operator ] && ! tmx_has "$parent"; then
+    if [ -f "$(closed_dir "$parent")/spec.env" ]; then
+      die "$(_t "'%s' belongs to '%s', which is not running: restore that one first (or restore --all)." "$s" "$parent")"
+    fi
+    warn "$(_t "Its coordinator '%s' no longer exists: '%s' comes back outside any team." "$parent" "$s")"
+    parent=operator team=''
+  fi
+  # The conversation id the agent last reported, else the one prama gave it.
+  sid=$(_kv_get "$spec" AGENT_SID "$(_kv_get "$spec" SESSION_ID)")
+  [[ "$sid" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || sid=''
+  [ "$agent" = opencode ] && sid='continue'   # it resumes the folder's last one, it has no ids
+  # Two processes must never write one conversation: an agent can outlive its session (agy ignores
+  # SIGHUP once it loses the terminal).
+  pid=$(_restore_live_agent "$s" "$sid")
+  [ -z "$pid" ] || die "$(_t "A process (pid %s) is still using the conversation of '%s': close it first." "$pid" "$s")"
+  # The folder decides which conversations a CLI can find: never restore into another one (the copy
+  # stays, for when the folder is back). A worktree that is gone comes back from its branch, same path.
+  local was want zdir; was=$(_kv_get "$spec" TARGET_DIR)
+  zdir=$(zone_dir "$zone") || die "$(_t "Zone '%s' is not registered." "$zone")"
+  if [ -n "$wt" ]; then want=$(worktree_path "$zdir" "$wt"); else want=$zdir; fi
+  if [ -n "$was" ] && [ "$was" != "$want" ]; then
+    die "$(_t "'%s' worked in %s and would now run in %s: its conversation would not be found." "$s" "$was" "$want")"
+  fi
+  # claude keeps a conversation once it got a message; before that there is nothing to resume.
+  local fresh=0
+  if [ -z "$sid" ] || { [ "$agent" = claude ] && ! claude_conversation_exists "$sid"; }; then fresh=1; fi
+  perm_allowed "$perm" || perm=ask
+  AGENT_MODEL=$(_kv_get "$spec" MODEL) AGENT_EFFORT=$(_kv_get "$spec" EFFORT) PRESET=$(_kv_get "$spec" PRESET)
+  BRIEF=''; [ -f "$d/brief" ] && BRIEF=$(cat "$d/brief")
+  PASS=(); [ -f "$d/args" ] && mapfile -d '' -t PASS < "$d/args"
+  ONESHOT=0 PARALLEL=0 DAEMON_TASK='' DAEMON_INTERVAL=60
+  out=$(RESTORE_SID=$sid PRAMA_PARENT=$parent PRAMA_TEAM=$team PRAMA_TEAM_ISOLATE=${iso:-0} PRAMA_TEAM_BASE=$base \
+        launch_agent "$agent" "$zone" "$role" "$perm" "$remote" "$profile" "$wt" porcelain "$s") || exit 1
+  state_set "$s" ${iso:+"ISOLATE=$iso"} ${base:+"BASE=$base"} ${obj:+"OBJECTIVE=$obj"}
+  bus_event restored "$(_fleet_caller)" "$s" "${sid:-new conversation}"
+  if (( fresh )); then ok "$(_t "'%s' is back with a new conversation: there was no saved one to resume." "$s")"
+  else ok "$(_t "'%s' is back, in its conversation." "$s")"; fi
+}
+
+# _restore_live_agent <session> <conversation> → pid of an agent CLI still tied to them: by the id on
+# its command line, or by the PRAMA_SESSION it inherited. Only agent CLIs count: a dev server the
+# agent left running inherits that variable too, and it does not write the conversation.
+_restore_live_agent() {
+  local s=$1 sid=$2 pid f
+  if [ -n "$sid" ] && [ "$sid" != continue ]; then
+    pid=$(pgrep -f -- "$sid" | head -n 1)
+    [ -z "$pid" ] || { printf '%s' "$pid"; return 0; }
+  fi
+  [ -d /proc/self ] || return 0
+  while IFS= read -r f; do
+    pid=${f#/proc/}; pid=${pid%%/*}
+    [[ "$(cat "/proc/$pid/comm" 2>/dev/null)" =~ $AGENT_BIN_RE ]] && { printf '%s' "$pid"; return 0; }
+  done < <(grep -lzxF -- "PRAMA_SESSION=$s" /proc/[0-9]*/environ 2>/dev/null)
+  return 0
 }
 
 # ── Agent types of a team ───────────────────────────────────────────────────
@@ -639,6 +778,7 @@ subcmd_fleet() {
     model)          _fleet_model "$@" ;;
     edit|set)       _fleet_edit "$@" ;;
     restart)        _fleet_restart "$@" ;;
+    restore|recover) _fleet_restore "$@" ;;
     agents|accounts) _fleet_agents "$@" ;;
     presets)        _fleet_presets ;;
     type|types)     _fleet_type "$@" ;;

@@ -339,7 +339,7 @@ _swarm_stop_team() {
     # the session a moment later, from outside this process.
     declare -F telegram_notify >/dev/null \
       && telegram_notify "$(_t '🏁 The coordinator closed team "%s" (%d executor(s)).' "$label" "$n")" team >/dev/null 2>&1
-    state_remove "$cs"
+    state_remove "$cs" closed
     tmx run-shell -b "sleep 2; tmux -L '$PRAMA_TMUX_SOCKET' kill-session -t '=$cs'" 2>/dev/null || tmx_kill "$cs"
     return 0
   fi

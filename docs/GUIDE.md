@@ -9,7 +9,7 @@ Everything prama-agent does, one section per topic. New here? Start with
 - [Teams and the cockpit](#teams-and-the-cockpit) · [isolated teams](#isolated-teams-a-branch-per-agent) · [assistants](#assistants-agents-that-work-for-you) · [team memory](#team-memory)
 - [The live plan](#the-live-plan)
 - [On your phone](#on-your-phone) · [Telegram](#telegram-control-from-your-phone)
-- [Fleet management](#fleet-management) · [health and quota](#how-health-and-quota-are-collected)
+- [Fleet management](#fleet-management) · [bringing a session back](#bringing-a-session-back) · [health and quota](#how-health-and-quota-are-collected)
 - [Roles and swarms](#roles-and-swarms) · [Presets](#presets) · [LLM profiles](#llm-profiles)
 - [Permissions and security](#permissions-and-security)
 - [Languages and themes](#languages-and-themes) · [Configuration](#configuration)
@@ -297,7 +297,7 @@ prama-agent fleet status --json              # state, block reason, model, prese
 prama-agent fleet spawn agy backend --preset cheap --task "Add tests for utils/date.ts"
 prama-agent fleet model prama-claude-backend-2 sonnet      # same pane, same conversation
 prama-agent fleet edit  prama-claude-backend-2 --effort high --preset reviewer
-prama-agent fleet restart <session> · fleet kill <session> · fleet agents · fleet presets · fleet models agy
+prama-agent fleet restart <session> · fleet kill <session> · fleet restore [<session>] · fleet agents · fleet presets · fleet models agy
 prama-agent fleet hooks status               # health hooks per agent CLI
 ```
 
@@ -318,6 +318,31 @@ prama-agent fleet hooks status               # health hooks per agent CLI
 - **Model changes never touch your defaults.** prama restarts the agent with `--model` instead of
   typing `/model`, which in Claude Code also rewrites your global default. agy model ids are
   validated against `agy models`, since agy silently falls back to its default on unknown ids.
+
+### Bringing a session back
+
+A session can end without anyone closing it through prama: a crash, a `tmux kill-session`, a reboot.
+prama keeps a copy of each session's spec (model, permissions, team, worktree, brief, conversation id),
+so nothing is lost with it:
+
+```bash
+prama-agent restore                 # what can come back, and how each one ended
+prama-agent restore prama-claude-backend     # that one: same spec, same folder, same conversation
+prama-agent restore --all           # everything that ended by itself, coordinators first
+```
+
+- **You are told.** When a session ends and nobody closed it through prama, the watchdog tells its
+  coordinator, your terminals and Telegram, once, with the command to run. Closing it with
+  `fleet kill`, `stop`, `swarm stop` or its own menu raises no alert, and it can still come back if
+  you change your mind. A rebooted server has no watchdog yet to tell you: `prama-agent status` shows
+  what ended.
+- **It comes back as it was.** Its queued tasks are still there, a member rejoins its team (restore the
+  coordinator first; `--all` does) and an agent launched through a team gets its role prompt again.
+- **It refuses rather than guess:** when another process still uses the conversation (two writers would
+  corrupt it), when the session would run in another folder (its CLI would not find the conversation),
+  and for daemons, whose task is not saved. A Claude agent that never got a message starts fresh.
+- An agent can bring back only an agent it launched itself, never a coordinator. The newest
+  `PRAMA_CLOSED_KEEP` (30) sessions stay saved, in the private state directory.
 
 ### How health and quota are collected
 
@@ -497,6 +522,7 @@ the menu, the tmux status bar of every agent and the fzf inspector. Both are als
 | `PRAMA_THEME` | `midnight` | color theme; `prama-agent theme` lists them |
 | `PRAMA_TUI_MOUSE` | `1` | mouse and touch in the menu |
 | `PRAMA_TG_NOTIFY` | `all` | Telegram notifications: `all`, `important`, `alerts`, `off` (the bot's `/notify` overrides it) |
+| `PRAMA_CLOSED_KEEP` | `30` | ended sessions kept for `prama-agent restore` |
 | `PRAMA_MEMORY_MAX_LINES` | `200` | notes kept per team / zone memory |
 | `PRAMA_PLAN_STALE_MIN` | `20` | minutes without activity before a task in progress is flagged stale |
 | `PRAMA_VERIFY_TIMEOUT` | `1800` | seconds `plan verify` lets an acceptance check run |

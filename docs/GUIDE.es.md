@@ -10,7 +10,7 @@ Todo lo que hace prama-agent, una sección por tema. ¿Primera vez? Empieza por
 - [Equipos y cockpit](#equipos-y-cockpit) · [equipos aislados](#equipos-aislados-una-rama-por-agente) · [asistentes](#asistentes-agentes-que-trabajan-para-ti) · [memoria del equipo](#memoria-del-equipo)
 - [El plan en vivo](#el-plan-en-vivo)
 - [Desde el celular](#desde-el-celular) · [Telegram](#telegram-control-desde-el-celular)
-- [Administración de la flota](#administración-de-la-flota) · [salud y cuota](#cómo-se-obtienen-la-salud-y-la-cuota)
+- [Administración de la flota](#administración-de-la-flota) · [traer de vuelta una sesión](#traer-de-vuelta-una-sesión) · [salud y cuota](#cómo-se-obtienen-la-salud-y-la-cuota)
 - [Roles y enjambres](#roles-y-enjambres) · [Presets](#presets) · [Perfiles LLM](#perfiles-llm)
 - [Permisos y seguridad](#permisos-y-seguridad)
 - [Idiomas y temas](#idiomas-y-temas) · [Configuración](#configuración)
@@ -305,7 +305,7 @@ prama-agent fleet status --json              # estado, motivo de bloqueo, modelo
 prama-agent fleet spawn agy backend --preset cheap --task "Agrega tests a utils/date.ts"
 prama-agent fleet model prama-claude-backend-2 sonnet      # mismo panel, misma conversación
 prama-agent fleet edit  prama-claude-backend-2 --effort high --preset reviewer
-prama-agent fleet restart <sesión> · fleet kill <sesión> · fleet agents · fleet presets · fleet models agy
+prama-agent fleet restart <sesión> · fleet kill <sesión> · fleet restore [<sesión>] · fleet agents · fleet presets · fleet models agy
 prama-agent fleet hooks status               # hooks de salud de cada CLI
 ```
 
@@ -327,6 +327,30 @@ prama-agent fleet hooks status               # hooks de salud de cada CLI
   vez de escribir `/model`, que en Claude Code también reescribe tu modelo global. Los ids de modelo de
   agy se validan contra `agy models`, porque agy usa en silencio su modelo por defecto si el id no
   existe.
+
+### Traer de vuelta una sesión
+
+Una sesión puede terminar sin que nadie la cierre desde prama: una caída, un `tmux kill-session`, un
+reinicio. prama guarda una copia de la configuración de cada sesión (modelo, permisos, equipo, worktree,
+encargo, id de conversación), así que nada se pierde con ella:
+
+```bash
+prama-agent restore                 # qué puede volver y cómo terminó cada una
+prama-agent restore prama-claude-backend     # esa: misma configuración, carpeta y conversación
+prama-agent restore --all           # todo lo que terminó solo, primero los coordinadores
+```
+
+- **Se te avisa.** Cuando una sesión termina y nadie la cerró desde prama, el watchdog avisa una vez a su
+  coordinador, a tus terminales y a Telegram, con el comando a correr. Cerrarla con `fleet kill`, `stop`,
+  `swarm stop` o su propio menú no genera alerta, y aun así puede volver si cambias de idea. Un servidor
+  recién reiniciado todavía no tiene watchdog que te avise: `prama-agent status` muestra lo que terminó.
+- **Vuelve como estaba.** Sus tareas en cola siguen ahí, un miembro vuelve a su equipo (restaura primero
+  al coordinador; `--all` lo hace) y un agente lanzado desde un equipo recibe de nuevo su prompt de rol.
+- **Se niega antes que adivinar:** si otro proceso sigue usando la conversación (dos escritores la
+  corromperían), si la sesión correría en otra carpeta (su CLI no encontraría la conversación) y con los
+  daemons, cuya tarea no se guarda. Un agente de Claude que nunca recibió un mensaje empieza de nuevo.
+- Un agente solo puede traer de vuelta a un agente que él lanzó, nunca a un coordinador. Quedan guardadas
+  las `PRAMA_CLOSED_KEEP` (30) sesiones más recientes, en el directorio privado de estado.
 
 ### Cómo se obtienen la salud y la cuota
 
@@ -515,6 +539,7 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_THEME` | `midnight` | tema de color; `prama-agent theme` los lista |
 | `PRAMA_TUI_MOUSE` | `1` | mouse y toques en el menú |
 | `PRAMA_TG_NOTIFY` | `all` | avisos de Telegram: `all`, `important`, `alerts`, `off` (`/avisos` del bot lo reemplaza) |
+| `PRAMA_CLOSED_KEEP` | `30` | sesiones terminadas que se guardan para `prama-agent restore` |
 | `PRAMA_MEMORY_MAX_LINES` | `200` | notas que guarda cada memoria de equipo / zona |
 | `PRAMA_PLAN_STALE_MIN` | `20` | minutos sin actividad antes de marcar estancada una tarea en curso |
 | `PRAMA_VERIFY_TIMEOUT` | `1800` | segundos que `plan verify` deja correr una verificación |

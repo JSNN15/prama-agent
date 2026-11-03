@@ -160,4 +160,5 @@ I18N+=(
   ['Only the operator can stop every agent; an agent closes its own with '\''prama-agent fleet kill <session>'\''.']='Solo el operador puede detener a todos los agentes; un agente cierra los suyos con '\''prama-agent fleet kill <sesión>'\''.'
   ['--brief requires a text (what the assistant helps the operator with)']='--brief requiere un texto (con qué ayuda el asistente al operador)'
   [''\''%s'\'' is the operator'\''s assistant: what they type there is private (PRAMA_ASSIST_PRIVATE=0 lets agents read it).']=''\''%s'\'' es el asistente del operador: lo que escribe ahí es privado (PRAMA_ASSIST_PRIVATE=0 deja que los agentes lo lean).'
+  ['%d session(s) ended by themselves: prama-agent restore']='%d sesión(es) terminaron solas: prama-agent restore'
 )

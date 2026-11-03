@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.11.0] - 2026-11-03
+
+### Added
+- **`prama-agent restore [<session>|--all|--json]`** (also `fleet restore`): a session that ended comes
+  back with the same spec, folder and conversation; its queued tasks are still there and a member
+  rejoins its team (`--all` restores coordinators first). It refuses a conversation another process
+  still uses, a folder that changed, and daemons (their task is not saved). An agent can bring back
+  only an agent it launched, never a coordinator.
+- **The watchdog tells when a session ends and nobody closed it through prama**, once, to its
+  coordinator, the operator's terminals and Telegram, with the command to bring it back, and it is
+  logged as a `vanished` event. Closing on purpose raises no alert; closing from the session's own menu
+  is now logged too. `prama-agent status` lists what ended, for a server that rebooted. The newest
+  `PRAMA_CLOSED_KEEP` (30) sessions stay saved.
+
+### Fixed
+- The watchdog logged `bad array subscript` when a session ended while it was being checked.
+
+### Changed
+- README: Herdr in the comparison table.
+
 ## [6.10.1] - 2026-11-03
 
 ### Removed

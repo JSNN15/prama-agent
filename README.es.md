@@ -43,18 +43,19 @@ de marketing) mientras el equipo sigue construyendo.
 
 Contrastado con la documentación de cada proyecto en noviembre de 2026; las correcciones son bienvenidas.
 
-| | prama-agent | [Claude Squad](https://github.com/smtg-ai/claude-squad) | [Agent of Empires](https://github.com/agent-of-empires/agent-of-empires) | [Gas Town](https://github.com/gastownhall/gastown) | [Equipos de agentes de Claude Code](https://code.claude.com/docs/en/agent-teams) |
-| --- | --- | --- | --- | --- | --- |
-| Corre en tu servidor, sobrevive a cortes de SSH | ✓ | ✓ | ✓ | ✓ | dentro de una sesión de Claude Code (experimental) |
-| CLIs de agentes | Claude Code, agy; OpenCode (experimental) | Claude, Codex, Gemini, Aider, cualquiera | 8+ | 11 presets | solo Claude |
-| Una rama de git por agente | ✓ con merge condicionado a tests | ✓ | ✓ y contenedores | ✓ con cola de merges | por subagente, opcional |
-| Agentes bloqueados y por qué | hooks del CLI + pantalla | pantalla | hooks + pantalla | registro + agentes vigilantes | hooks nativos |
-| Cuota de 5 h / semanal | ✓ alerta al 90 % | — | no documentado | — | ✓ |
-| Desde el celular | Telegram, con acciones | — | panel web | panel web | Remote Control |
-| Plan contrastado con el trabajo | ✓ estancadas, sin verificar, solapadas; corre la verificación de aceptación | — | — | registro de issues | lista de tareas compartida |
-| Runtime · licencia | bash + tmux · Apache-2.0 | Go · AGPL-3.0 | Rust · MIT | Go · MIT | integrado |
+| | prama-agent | [Herdr](https://github.com/herdrdev/herdr) | [Claude Squad](https://github.com/smtg-ai/claude-squad) | [Agent of Empires](https://github.com/agent-of-empires/agent-of-empires) | [Gas Town](https://github.com/gastownhall/gastown) | [Equipos de agentes de Claude Code](https://code.claude.com/docs/en/agent-teams) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Corre en tu servidor, sobrevive a cortes de SSH | ✓ | ✓, varias máquinas en una vista | ✓ | ✓ | ✓ | dentro de una sesión de Claude Code (experimental) |
+| CLIs de agentes | Claude Code, agy; OpenCode (experimental) | 20+ | Claude, Codex, Gemini, Aider, cualquiera | 8+ | 11 presets | solo Claude |
+| Una rama de git por agente | ✓ con merge condicionado a tests | comandos de worktree; el merge es tuyo | ✓ | ✓ y contenedores | ✓ con cola de merges | por subagente, opcional |
+| Agentes bloqueados y por qué | hooks del CLI + pantalla | reglas de pantalla + integraciones | pantalla | hooks + pantalla | registro + agentes vigilantes | hooks nativos |
+| Cuota de 5 h / semanal | ✓ alerta al 90 % | — | — | no documentado | — | ✓ |
+| Desde el celular | Telegram, con acciones | SSH, vista angosta | — | panel web | panel web | Remote Control |
+| Plan contrastado con el trabajo | ✓ estancadas, sin verificar, solapadas; corre la verificación de aceptación | — | — | — | registro de issues | lista de tareas compartida |
+| Runtime · licencia | bash + tmux · Apache-2.0 | Rust · Apache-2.0 | Go · AGPL-3.0 | Rust · MIT | Go · MIT | integrado |
 
-Dónde conviene otra herramienta: **Claude Squad** si quieres un binario único que maneja cualquier CLI
+Dónde conviene otra herramienta: **Herdr** si quieres un terminal hecho para agentes: muchos CLIs, varias
+máquinas, mouse y plugins, y la coordinación queda en tus manos. **Claude Squad** si quieres un binario único que maneja cualquier CLI
 de agentes, con pestaña de diff. **Agent of Empires** para muchos CLIs, sandboxes en contenedores y una
 interfaz web. **Gas Town** para más de 20 agentes y una cola de merges que aísla fallas por bisección.
 Los **equipos de agentes de Claude Code** si solo usas Claude y no quieres instalar nada.

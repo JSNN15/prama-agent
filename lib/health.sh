@@ -412,11 +412,13 @@ watchdog_tick() {
       W_READY[$s]=0
     fi
     _watch_quota_collect "$s"
+    _watch_snapshot "$s"
   done < <(prama_sessions)
 
   for s in "${!W_PREV[@]}"; do
     [ -n "${seen[$s]:-}" ] || unset 'W_PREV[$s]' 'W_READY[$s]'
   done
+  _watch_closed
   # The assistant the status bar calls the operator to: gone, or already found by them.
   local wa
   wa=$(tmx show-options -gqv @prama_assist 2>/dev/null)
@@ -427,6 +429,59 @@ watchdog_tick() {
   fi
   _watch_quota_alerts
   _watch_plans
+}
+
+# Keeps the copy `restore` uses up to date, whatever code the session's own supervisor is running
+# (it keeps the version it started with) and however it ends.
+_watch_snapshot() {
+  local s=$1 f d sid
+  is_internal_session "$s" && return 0
+  f=$(state_file "$s") d=$(closed_dir "$s")
+  [ -f "$f" ] || return 0
+  sid=$(health_get "$s" AGENT_SID)
+  if [ ! -f "$d/spec.env" ] || [ "$f" -nt "$d/spec.env" ] \
+     || { [ -n "$sid" ] && [ "$sid" != "$(_kv_get "$d/spec.env" AGENT_SID)" ]; }; then
+    session_archive "$s"
+  fi
+  return 0
+}
+
+# Sessions that ended and nobody closed through prama: told once, with the way back. Read from disk,
+# so a watchdog restarted in the meantime still sees them.
+_watch_closed() {
+  local d s p msg now=${EPOCHSECONDS:-$(date +%s)}
+  local -a gone=()
+  [ -d "$PRAMA_BUS_DIR/closed" ] || return 0
+  for d in "$PRAMA_BUS_DIR"/closed/*/; do
+    [ -f "${d}spec.env" ] || continue
+    s=${d%/}; s=${s##*/}
+    [ -z "$(_kv_get "${d}meta" CLOSED)" ] || continue
+    tmx_has "$s" && continue
+    state_remove "$s" vanished
+    gone+=("$s")
+    bus_event vanished watchdog "$s" "$(_kv_get "${d}spec.env" AGENT)@$(_kv_get "${d}spec.env" ZONE)"
+    _tv msg '■ %s ended and nobody closed it through prama' "$s"; _watch_log "$msg"
+    # Its coordinator, when it has one running (other teams are not told).
+    p=$(_kv_get "${d}spec.env" PARENT)
+    if [ -n "$p" ] && [ "$p" != operator ] && valid_session_name "$p" && tmx_has "$p" && [ "$(session_role "$p")" = coordinator ]; then
+      _tv msg "[PRAMA ALERT] '%s' ended and nobody closed it through prama. Bring it back with its conversation: prama-agent restore %s" "$s" "$s"
+      deliver_to_session "$p" "$msg" || true
+    fi
+  done
+  if (( ${#gone[@]} )); then
+    if (( ${#gone[@]} == 1 )); then
+      _tv msg "[PRAMA ALERT] '%s' ended and nobody closed it through prama. Bring it back with its conversation: prama-agent restore %s" "${gone[0]}" "${gone[0]}"
+    else
+      _tv msg '[PRAMA ALERT] These sessions ended and nobody closed them through prama: %s. Bring them back with their conversations: prama-agent restore --all' "${gone[*]}"
+    fi
+    local cl term
+    while IFS='|' read -r cl term; do
+      [ -n "$cl" ] && [[ "$term" != tmux* ]] && tmx display-message -c "$cl" "$msg" 2>/dev/null
+    done < <(tmx list-clients -F '#{client_name}|#{client_termname}' 2>/dev/null)
+    declare -F telegram_notify >/dev/null && telegram_notify "$msg" alert
+  fi
+  if (( now - ${W_PRUNE_AT:-0} >= 3600 )); then W_PRUNE_AT=$now; closed_prune; fi
+  return 0
 }
 
 # Every minute: each live team's plan, checked against what its agents actually do (lib/plan.sh).

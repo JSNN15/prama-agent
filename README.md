@@ -43,18 +43,19 @@ goes on building.
 
 Checked against each project's own documentation in November 2026; corrections are welcome.
 
-| | prama-agent | [Claude Squad](https://github.com/smtg-ai/claude-squad) | [Agent of Empires](https://github.com/agent-of-empires/agent-of-empires) | [Gas Town](https://github.com/gastownhall/gastown) | [Claude Code agent teams](https://code.claude.com/docs/en/agent-teams) |
-| --- | --- | --- | --- | --- | --- |
-| Runs on your server, survives SSH drops | ✓ | ✓ | ✓ | ✓ | inside one Claude Code session (experimental) |
-| Agent CLIs | Claude Code, agy; OpenCode (experimental) | Claude, Codex, Gemini, Aider, any | 8+ | 11 presets | Claude only |
-| A git branch per agent | ✓ with test-gated merge | ✓ | ✓ plus containers | ✓ with a merge queue | per subagent, opt-in |
-| Blocked agents and why | CLI hooks + screen | screen | hooks + screen | ledger + watchdog agents | native hooks |
-| 5 h / weekly quota | ✓ alert at 90 % | — | not documented | — | ✓ |
-| From your phone | Telegram, with actions | — | web dashboard | web dashboard | Remote Control |
-| Plan checked against the work | ✓ stale, unverified, overlap; runs the acceptance check | — | — | issue ledger | shared task list |
-| Runtime · license | bash + tmux · Apache-2.0 | Go · AGPL-3.0 | Rust · MIT | Go · MIT | built in |
+| | prama-agent | [Herdr](https://github.com/herdrdev/herdr) | [Claude Squad](https://github.com/smtg-ai/claude-squad) | [Agent of Empires](https://github.com/agent-of-empires/agent-of-empires) | [Gas Town](https://github.com/gastownhall/gastown) | [Claude Code agent teams](https://code.claude.com/docs/en/agent-teams) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Runs on your server, survives SSH drops | ✓ | ✓, several machines in one view | ✓ | ✓ | ✓ | inside one Claude Code session (experimental) |
+| Agent CLIs | Claude Code, agy; OpenCode (experimental) | 20+ | Claude, Codex, Gemini, Aider, any | 8+ | 11 presets | Claude only |
+| A git branch per agent | ✓ with test-gated merge | worktree commands; merging is yours | ✓ | ✓ plus containers | ✓ with a merge queue | per subagent, opt-in |
+| Blocked agents and why | CLI hooks + screen | screen rules + integrations | screen | hooks + screen | ledger + watchdog agents | native hooks |
+| 5 h / weekly quota | ✓ alert at 90 % | — | — | not documented | — | ✓ |
+| From your phone | Telegram, with actions | SSH, narrow layout | — | web dashboard | web dashboard | Remote Control |
+| Plan checked against the work | ✓ stale, unverified, overlap; runs the acceptance check | — | — | — | issue ledger | shared task list |
+| Runtime · license | bash + tmux · Apache-2.0 | Rust · Apache-2.0 | Go · AGPL-3.0 | Rust · MIT | Go · MIT | built in |
 
-Where others are the better choice: **Claude Squad** for one binary that drives any agent CLI, with a
+Where others are the better choice: **Herdr** for a terminal built around agents: many CLIs, several
+machines, mouse and plugins, with the coordination left to you. **Claude Squad** for one binary that drives any agent CLI, with a
 diff tab. **Agent of Empires** for many CLIs, container sandboxes and a web UI. **Gas Town** for 20+
 agents and a merge queue that bisects failures. **Claude Code agent teams** if you only use Claude and
 want nothing to install. **Conductor** and **Nimbalyst** for a desktop app with diff review.

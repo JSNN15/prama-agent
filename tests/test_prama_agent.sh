@@ -1054,6 +1054,96 @@ out=$(PRAMA_SESSION=tp-tyx "$BIN" fleet type add x --brief y 2>&1); rc=$?
 assert_true "An agent outside any team has no types to define" "[ $rc -ne 0 ]"
 "$BIN" stop --all -y >/dev/null 2>&1
 
+section "Recovery: sessions that end come back with their conversation"
+"$BIN" stop --all -y >/dev/null 2>&1
+LIBS='for m in core ui agents roles bus swarm worktrees plan health; do source "'"$REPO_DIR"'/lib/$m.sh"; done; prama_init >/dev/null 2>&1'
+spec() { grep "^$2=" "$STATE/bus/state/$1.env" | cut -d= -f2-; }
+EV="$STATE/bus/events.jsonl"
+mock_ctl tp-rc interactive; PRAMA_TEAM=rec "$BIN" claude alpha --bg --ask --role coordinator --name tp-rc >/dev/null
+bash -c "$LIBS"'; state_set tp-rc ISOLATE=0 "OBJECTIVE=volver a empezar"'
+mock_ctl tp-rx interactive
+PRAMA_SESSION=tp-rc "$BIN" fleet spawn claude alpha --name tp-rx --model sonnet -- --verbose >/dev/null 2>&1
+wait_for 5 "$P capture-pane -p -t '=tp-rc:' | grep -q MOCK_AGENT"
+wait_for 5 "$P capture-pane -p -t '=tp-rx:' | grep -q MOCK_AGENT"
+sid=$(spec tp-rx SESSION_ID); csid=$(spec tp-rc SESSION_ID)
+mkdir -p "$HOME/.claude/projects/r" && : > "$HOME/.claude/projects/r/$sid.jsonl"
+: > "$HOME/.claude/projects/r/$csid.jsonl"
+$P kill-session -t =tp-rx
+wait_for 5 "! pgrep -f '$sid' >/dev/null"
+out=$("$BIN" fleet watchdog tick 2>&1)
+assert_contains "The watchdog notices a session nobody closed through prama" "tp-rx terminó" "$out"
+assert_true "…logged on the bus" "grep -q '\"event\":\"vanished\".*\"to\":\"tp-rx\"' '$EV'"
+assert_true "…and its coordinator is told how to bring it back" "wait_for 5 \"$P capture-pane -p -J -t '=tp-rc:' -S -80 | grep -q 'restore tp-rx'\""
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "…only once" "1" "$(grep -c '"event":"vanished".*"to":"tp-rx"' "$EV")"
+assert_contains "restore lists it" "terminó sola" "$("$BIN" restore 2>&1)"
+assert_eq "…also as JSON" "vanished" "$("$BIN" restore --json | jq -r '.[] | select(.session=="tp-rx") | .reason')"
+assert_contains "prama-agent status says so" "terminaron solas" "$("$BIN" status 2>&1)"
+"$BIN" bus assign tp-rx "para cuando vuelva" >/dev/null 2>&1
+( exec -a "fake-agent --resume $sid" sleep 30 ) & fake=$!
+wait_for 3 "pgrep -f 'fake-agent --resume $sid' >/dev/null"
+out=$("$BIN" restore tp-rx 2>&1); rc=$?
+assert_true "restore refuses while a process still uses that conversation" "[ $rc -ne 0 ] && [[ \"\$out\" == *'$fake'* ]] && ! $P has-session -t =tp-rx 2>/dev/null"
+kill "$fake" 2>/dev/null; wait "$fake" 2>/dev/null
+cdir="$STATE/bus/closed/tp-rx"
+cp "$cdir/spec.env" "$TMP_ROOT/spec.bak"; sed -i 's|^TARGET_DIR=.*|TARGET_DIR=/somewhere/else|' "$cdir/spec.env"
+out=$("$BIN" restore tp-rx 2>&1); rc=$?
+assert_true "…or when it would run in another folder (its conversation would not be found)" "[ $rc -ne 0 ] && [[ \"\$out\" == */somewhere/else* ]] && [ -f '$cdir/spec.env' ]"
+cp "$TMP_ROOT/spec.bak" "$cdir/spec.env"
+out=$("$BIN" restore tp-rx 2>&1)
+assert_contains "restore brings it back" "en su conversación" "$out"
+wait_for 8 "$P capture-pane -p -J -t '=tp-rx:' -S -300 | grep -q MOCK_AGENT"
+out=$($P capture-pane -p -J -t '=tp-rx:' -S -300)
+assert_contains "…resuming the same conversation" "[--resume] [$sid]" "$out"
+assert_contains "…with the same model" "[--model] [sonnet]" "$out"
+assert_contains "…the same pass-through arguments" "[--verbose]" "$out"
+assert_contains "…and its team's role prompt" "PRAMA-SWARM ROLE: EXECUTOR" "$out"
+assert_eq "…back in its team" "rec tp-rc" "$(spec tp-rx TEAM) $(spec tp-rx PARENT)"
+assert_eq "…what was queued for it is still there" "1" "$(st tp-rx .queue)"
+n=$(grep -c '"event":"vanished"' "$EV")
+"$BIN" stop tp-rx >/dev/null 2>&1
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "A session closed on purpose raises no alert" "$n" "$(grep -c '"event":"vanished"' "$EV")"
+assert_eq "…and can still come back" "closed" "$("$BIN" restore --json | jq -r '.[] | select(.session=="tp-rx") | .reason')"
+"$BIN" claude alpha --bg --name tp-rq >/dev/null
+wait_for 10 "$P capture-pane -p -t '=tp-rq:' | grep -q PRAMA_STANDBY"
+$P send-keys -t '=tp-rq:' q
+wait_for 5 "! $P has-session -t =tp-rq 2>/dev/null"
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "…nor one closed from its own menu" "$n" "$(grep -c '"event":"vanished"' "$EV")"
+assert_true "…which is logged now" "grep -q '\"to\":\"tp-rq\",\"text\":\"closed from its menu\"' '$EV'"
+out=$(PRAMA_SESSION=tp-rc "$BIN" restore tp-rq 2>&1); rc=$?
+assert_true "An agent cannot bring back what it did not launch" "[ $rc -ne 0 ]"
+out=$(PRAMA_SESSION=tp-rc "$BIN" restore tp-rx 2>&1); rc=$?
+assert_true "…but a coordinator can bring back its own agent" "[ $rc -eq 0 ] && $P has-session -t =tp-rx"
+wait_for 5 "$P capture-pane -p -t '=tp-rx:' | grep -q MOCK_AGENT"
+mock_ctl tp-ra interactive
+PRAMA_SESSION=tp-rc "$BIN" fleet spawn claude alpha --role assistant --name tp-ra --brief "Encargo que sobrevive" >/dev/null 2>&1
+mock_ctl tp-rz interactive; "$BIN" claude alpha --bg --name tp-rz >/dev/null
+$P kill-session -t =tp-rc; $P kill-session -t =tp-rx; $P kill-session -t =tp-ra
+wait_for 5 "! pgrep -f '$sid' >/dev/null && ! pgrep -f '$csid' >/dev/null"
+out=$(PRAMA_SESSION=tp-rz "$BIN" restore tp-rc 2>&1); rc=$?
+assert_true "…never a coordinator" "[ $rc -ne 0 ] && ! $P has-session -t =tp-rc 2>/dev/null"
+out=$("$BIN" restore tp-rx 2>&1); rc=$?
+assert_true "An agent whose coordinator is down waits for it (it would lose its team)" "[ $rc -ne 0 ] && [[ \"\$out\" == *tp-rc* ]]"
+out=$("$BIN" restore --all 2>&1); rc=$?
+assert_true "restore --all brings the team back, coordinator first" "[ $rc -eq 0 ] && $P has-session -t =tp-rc && $P has-session -t =tp-rx && $P has-session -t =tp-ra"
+assert_true "…and leaves out what was closed on purpose" "! $P has-session -t =tp-rq 2>/dev/null"
+assert_eq "A coordinator keeps its team, isolation and objective" "rec|0|volver a empezar" "$(spec tp-rc TEAM)|$(spec tp-rc ISOLATE)|$(spec tp-rc OBJECTIVE)"
+wait_for 8 "$P capture-pane -p -J -t '=tp-ra:' -S -300 | grep -q 'Encargo que sobrevive'"
+assert_contains "An assistant keeps its brief" "Encargo que sobrevive" "$($P capture-pane -p -J -t '=tp-ra:' -S -300)"
+mkdir -p "$STATE/bus/closed/tp-rbad"; printf 'AGENT=evil\nROLE=executor\nZONE=alpha\n' > "$STATE/bus/closed/tp-rbad/spec.env"
+out=$("$BIN" restore tp-rbad 2>&1); rc=$?
+assert_true "What was saved is checked like any input (an unknown agent is refused)" "[ $rc -ne 0 ] && ! $P has-session -t =tp-rbad 2>/dev/null"
+printf 'AGENT=claude\nROLE=daemon\nZONE=alpha\n' > "$STATE/bus/closed/tp-rbad/spec.env"
+out=$("$BIN" restore tp-rbad 2>&1); rc=$?
+assert_true "…a daemon is refused, with the reason (its task is not saved)" "[ $rc -ne 0 ] && [[ \"\$out\" == *daemon* ]]"
+out=$(bash -c "$LIBS"'; resolve_pane_agent_pid "" 2>&1; session_has_agent_process tp-no-such 2>&1; echo "rc=$?"')
+assert_eq "A session that ends in mid-check breaks nothing (no bad array subscript)" "rc=1" "$out"
+PRAMA_CLOSED_KEEP=1 "$BIN" restore >/dev/null 2>&1
+assert_true "Only the newest PRAMA_CLOSED_KEEP stay saved, and never a running session's" "[ \$($BIN restore --json | jq 'length') -le 1 ] && [ -f '$STATE/bus/closed/tp-rc/spec.env' ]"
+"$BIN" stop --all -y >/dev/null 2>&1
+
 section "UI engine"
 out=$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; str_width "ab"; echo; str_width "🤝 ab"; echo; str_width "✦ x"')
 assert_eq "Display width counts emoji as 2 columns" $'2\n5\n3' "$out"

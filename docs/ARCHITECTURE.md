@@ -108,6 +108,12 @@ creates private dirs).
     `PRAMA_ASSIST_OPEN=switch` and the operator is idle), and other agents cannot read an assistant's
     screen (`_assistant_private`). Its brief lives in `<session>.brief`, never in the state file.
 
+23. **What comes back is checked like any input.** `closed/<session>/` is data (read key by key, never
+    sourced), kept private. `restore` validates the agent, role, names and conversation id it reads,
+    goes through `launch_agent` (host policy, permission ceiling) and refuses a conversation another
+    process still uses or a folder that changed. Closing marks the session first (`session_archive
+    <s> closed` inside `tmx_kill`), so only what ended with no mark is reported as vanished.
+
 ## core.sh API
 
 | Function | Purpose |
