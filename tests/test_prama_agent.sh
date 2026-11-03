@@ -849,7 +849,7 @@ section "Regression: v6.8.0 review (navigation, cockpit, teams, delivery)"
 LIBS='for m in core ui agents roles bus swarm worktrees plan health; do source "'"$REPO_DIR"'/lib/$m.sh"; done; prama_init >/dev/null 2>&1'
 conf=$(cat "$STATE/tmux.conf")
 assert_contains "Alt+a goes through run-shell, which expands #{client_name}" "run-shell -b" "$(grep -F -- "agents\"" <<< "$conf" | grep -F "bind -n M-a")"
-assert_not_contains "…never a display-popup holding an unexpanded #{client_name}" "display-popup" "$(grep -F '#{client_name}' <<< "$conf")"
+assert_not_contains "…never a display-popup holding an unexpanded #{client_name}" "display-popup" "$(grep -F '#{client_name}' <<< "$conf" | grep -v '^#')"
 # The whole path, with a real client: key → binding → popup → picker → switch (fzf picks tp-nav2).
 mock_ctl tp-nav1 interactive; "$BIN" claude alpha --bg --name tp-nav1 >/dev/null
 mock_ctl tp-nav2 interactive; "$BIN" claude alpha --bg --name tp-nav2 >/dev/null
