@@ -39,6 +39,7 @@ USER_SOCKET="user-test-$$"
 cleanup() {
   tmux -L "$PRAMA_TMUX_SOCKET" kill-server 2>/dev/null
   tmux -L "$USER_SOCKET" kill-server 2>/dev/null
+  tmux -L "prama-test-demo-$$" kill-server 2>/dev/null
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
@@ -1035,6 +1036,34 @@ wait_for 8 "$P capture-pane -p -J -t '=tp-guia:' -S -600 | grep -q -- '\[--model
 assert_eq "A restarted assistant keeps its brief" "2" "$($P capture-pane -p -J -t '=tp-guia:' -S -600 | grep -c 'Guía del CLI de backend.')"
 tmux -L "$USER_SOCKET" kill-session -t =op 2>/dev/null
 "$BIN" stop --all -y >/dev/null 2>&1
+
+section "Agent types and the demo"
+mock_ctl tp-tyc interactive; PRAMA_TEAM=tipos "$BIN" claude alpha --bg --role coordinator --name tp-tyc >/dev/null
+out=$(PRAMA_SESSION=tp-tyc "$BIN" fleet type add guia-cli --role assistant --agent claude --model sonnet --plan --brief "Guía de la CLI del proyecto" 2>&1); rc=$?
+assert_true "A coordinator saves an agent type for its team" "[ $rc -eq 0 ] && [ -f '$STATE/types/alpha/tipos/guia-cli.env' ]"
+assert_true "…listed for the operator" "$BIN fleet type list --zone alpha --team tipos --json | jq -e '.[0].name == \"guia-cli\" and .[0].perm == \"plan\"' >/dev/null"
+mock_ctl tp-tyg interactive
+PRAMA_SESSION=tp-tyc "$BIN" fleet spawn --type guia-cli --name tp-tyg --brief "Hoy: los comandos de deploy" >/dev/null 2>&1
+assert_eq "fleet spawn --type launches it with the type's role, model and permissions" "assistant sonnet plan" \
+  "$(st tp-tyg '.role + " " + .model + " " + .perm')"
+wait_for 5 "$P capture-pane -p -J -t '=tp-tyg:' -S -300 | grep -q 'Hoy: los comandos'"
+out=$($P capture-pane -p -J -t '=tp-tyg:' -S -300)
+assert_contains "…and its brief, plus what is specific this time" "Guía de la CLI del proyecto" "$out"
+assert_contains "…" "Hoy: los comandos de deploy" "$out"
+mock_ctl tp-tyx interactive; "$BIN" claude alpha --bg --name tp-tyx >/dev/null
+out=$(PRAMA_SESSION=tp-tyx "$BIN" fleet type add x --brief y 2>&1); rc=$?
+assert_true "An agent outside any team has no types to define" "[ $rc -ne 0 ]"
+"$BIN" stop --all -y >/dev/null 2>&1
+dsock="prama-test-demo-$$"
+out=$(PRAMA_DEMO_SOCKET=$dsock "$BIN" demo start 2>&1); rc=$?
+assert_true "prama-agent demo builds a sandbox team" "[ $rc -eq 0 ] && tmux -L $dsock has-session -t =prama-coordinator-claude-shop"
+assert_true "…in its own tmux server and state, not the real ones" "[ -d '$STATE/demo/state' ] && ! $P has-session -t =prama-coordinator-claude-shop 2>/dev/null"
+assert_true "The simulated team plans, delegates, merges with the tests and closes the plan" \
+  "wait_for 120 \"[ \\\$(grep -c 'done' '$STATE/demo/state/plans/shop/principal/tasks' 2>/dev/null || echo 0) -ge 3 ]\""
+assert_true "…its branches are merged into main" "[ \$(git -C '$STATE/demo/repos/shop' log --oneline main | grep -c 'Merge prama/principal') -eq 2 ]"
+assert_true "…and an assistant waits for the operator" "tmux -L $dsock has-session -t =guia"
+PRAMA_DEMO_SOCKET=$dsock "$BIN" demo stop >/dev/null 2>&1
+assert_true "demo stop closes it and deletes the sandbox" "! tmux -L $dsock has-session 2>/dev/null && [ ! -e '$STATE/demo' ]"
 
 section "UI engine"
 out=$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; str_width "ab"; echo; str_width "🤝 ab"; echo; str_width "✦ x"')

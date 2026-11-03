@@ -150,6 +150,18 @@ prama-agent fleet spawn claude backend --role assistant --name guia \
   `logs` / `capture` (podrías pegarle una llave); `PRAMA_ASSIST_PRIVATE=0` lo permite.
 - Una tarea del plan en manos de un asistente nunca se marca como estancada: te está esperando. `--plan`
   deja al asistente en solo lectura; `--worktree <rama>` le da su propia rama a uno que escribe código.
+- **Tipos de agente.** El coordinador decide qué tipos de agente necesita su trabajo, guarda cada uno
+  una vez y luego lo lanza por nombre; tú los ves con `prama-agent fleet type list --zone <zona> --team <equipo>`:
+
+  ```bash
+  prama-agent fleet type add guia-cli --role assistant --agent claude --model sonnet --plan \
+    --brief "Ayuda al operador a usar la CLI del backend; los cambios van al coordinador."
+  prama-agent fleet spawn --type guia-cli --name guia --brief "Hoy: los comandos de deploy"
+  ```
+
+  Un tipo guarda un rol (`assistant`, `executor`, `reader`), un agente, modelo y esfuerzo, si es de solo
+  lectura y un encargo; vive en el estado privado del equipo y no lleva herramientas, servidores MCP ni
+  skills (los presets, que escribes tú, sí).
 
 ### Memoria del equipo
 

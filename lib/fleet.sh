@@ -149,7 +149,7 @@ _fleet_status() {
 _fleet_spawn() {
   local agent='' zone='' name='' wt='' task='' json=0 arg m
   local role=executor profile=default perm=ask remote=${PRAMA_DEFAULT_REMOTE:-0}
-  local a_exp=0 r_exp=0 p_exp=0 perm_exp=0
+  local a_exp=0 r_exp=0 p_exp=0 perm_exp=0 ftype=''
   (( ${PRAMA_SKIP_PERMISSIONS:-0} )) && perm=yolo
   local pass=()
   AGENT_MODEL='' AGENT_EFFORT='' PRESET='' BRIEF=''
@@ -165,6 +165,7 @@ _fleet_spawn() {
       --worktree|-w) wt=${2:?$(_t '--worktree requires a branch')}; shift 2 ;;
       --task)       task=${2:?$(_t '--task requires an instruction')}; shift 2 ;;
       --brief)      BRIEF=${2:?$(_t '--brief requires a text (what the assistant helps the operator with)')}; shift 2 ;;
+      --type)       ftype=${2:?$(_t '--type requires the name of an agent type (prama-agent fleet type list)')}; shift 2 ;;
       --yolo)       perm=yolo; perm_exp=1; shift ;;
       --ask)        perm=ask; perm_exp=1; shift ;;
       --plan)       perm=plan; perm_exp=1; shift ;;
@@ -179,6 +180,18 @@ _fleet_spawn() {
         shift ;;
     esac
   done
+  # A team's agent type gives the defaults; explicit flags win (the brief is joined to the type's).
+  if [ -n "$ftype" ]; then
+    _type_scope "$zone" ''
+    type_load "$ftype" || die "$(_t "Unknown agent type: '%s' (prama-agent fleet type list)" "$ftype")"
+    (( a_exp )) || { agent=${TY[AGENT]:-$agent}; a_exp=1; }
+    (( r_exp )) || { role=${TY[ROLE]:-$role}; r_exp=1; }
+    [ -n "$AGENT_MODEL" ] || AGENT_MODEL=${TY[MODEL]:-}
+    [ -n "$AGENT_EFFORT" ] || AGENT_EFFORT=${TY[EFFORT]:-}
+    (( perm_exp )) || { [ "${TY[PERM]:-}" = plan ] && perm=plan && perm_exp=1; }
+    [ -z "$TY_BRIEF" ] || BRIEF="$TY_BRIEF${BRIEF:+$'\n\n'$BRIEF}"
+    [ -n "$zone" ] || zone=$TY_ZONE
+  fi
   (( perm_exp )) || perm=$(perm_cap_default "$perm")
   AGENT=$agent ROLE=$role PROFILE=$profile
   preset_apply_defaults "$a_exp" "$r_exp" "$p_exp" || exit 1
@@ -473,6 +486,8 @@ ${C_BOLD}prama-agent fleet${C_OFF} — fleet management (for humans and coordina
   restart <session>                       relaunches the agent, keeping the conversation
   kill <session>                          closes the agent
   agents [--json]                         agents you can launch, each account's quota and a cost hint
+  type [list|add|rm] <name> …             the team's agent types: --role assistant|executor|reader --agent A
+                                          [--model M] [--plan] --brief "…"; launch one with spawn --type <name>
   presets                                 available presets and installed agents
   models [claude|opencode|agy]            accepted models
   watchdog [status|start|stop|logs|tick]  fleet watchdog (alerts, quota and queue delivery)
@@ -496,6 +511,8 @@ ${C_BOLD}prama-agent fleet${C_OFF} — gestión de la flota (para humanos y coor
   restart <sesión>                        relanza el agente conservando la conversación
   kill <sesión>                           cierra el agente
   agents [--json]                         agentes que se pueden lanzar, cuota de cada cuenta y costo
+  type [list|add|rm] <nombre> …           los tipos de agente del equipo: --role assistant|executor|reader --agent A
+                                          [--model M] [--plan] --brief "…"; lanza uno con spawn --type <nombre>
   presets                                 presets disponibles y agentes instalados
   models [claude|opencode|agy]            modelos aceptados
   watchdog [status|start|stop|logs|tick]  vigilante de la flota (alertas, cuota y entrega de colas)
@@ -504,6 +521,112 @@ ${C_BOLD}prama-agent fleet${C_OFF} — gestión de la flota (para humanos y coor
 Desde un agente (PRAMA_SESSION definido) no se puede actuar sobre uno mismo ni sobre un coordinador,
 y solo dentro de PRAMA_FLEET_SCOPE=${PRAMA_FLEET_SCOPE:-zone}. Máximo ${PRAMA_FLEET_MAX:-8} agentes vivos.
 EOF
+}
+
+# ── Agent types of a team ───────────────────────────────────────────────────
+# The coordinator decides which kinds of agents its work needs (a code executor, a guide to the
+# project's CLI, a marketing assistant…) and saves each as a type: role, agent, model, effort, read-only
+# or not, and a brief. `fleet spawn --type <name>` launches one. Types are data in the team's private
+# state ($PRAMA_STATE_HOME/types/<zone>/<team>/<name>.env + .brief), never sourced; they hold no tools,
+# MCP servers, skills or permissions above ask (presets, which the operator writes, can).
+TYPE_NAME_RE='^[a-z0-9][a-z0-9-]{0,23}$'
+
+# _type_scope [--zone Z --team T] → TY_DIR (an agent: its own team; the operator names one)
+_type_scope() {
+  local zone=${1:-} team=${2:-} c
+  if [ -n "${PRAMA_SESSION:-}" ] && [ -f "$(state_file "$PRAMA_SESSION")" ]; then
+    c=$(session_team "$PRAMA_SESSION") || die "$(_t 'Agent types belong to a team: %s is in none.' "$PRAMA_SESSION")"
+    zone=$(state_get "$c" ZONE) team=$(team_name "$c")
+  else
+    [ -n "$zone" ] || die "$(_t 'Which team? --zone <zone> --team <team>')"
+    zone=$(match_zone "$zone") || die "$(_t "Unknown zone: '%s'" "${1:-}")"
+    [ -n "$team" ] || team=$PRAMA_DEFAULT_TEAM
+    valid_team_name "$team" || die "$(_t 'Invalid team name: %s' "$team")"
+  fi
+  TY_ZONE=$zone TY_TEAM=$team
+  TY_DIR="$PRAMA_STATE_HOME/types/$(slugify "$zone")/$team"
+}
+
+# type_load <name> → TY (assoc: AGENT ROLE MODEL EFFORT PERM DESCRIPTION) and TY_BRIEF; scope set before.
+type_load() {
+  local f=$TY_DIR/$1.env line k v
+  [[ "$1" =~ $TYPE_NAME_RE ]] && [ -f "$f" ] || return 1
+  declare -gA TY=()
+  while IFS= read -r line || [ -n "$line" ]; do
+    k=${line%%=*} v=${line#*=}
+    case $k in AGENT|ROLE|MODEL|EFFORT|PERM|DESCRIPTION) TY[$k]=$v ;; esac
+  done < "$f"
+  TY_BRIEF=$(head -c 8000 "$TY_DIR/$1.brief" 2>/dev/null)
+  return 0
+}
+
+_fleet_type() {
+  local sub=${1:-list}; (( $# )) && shift
+  local zone='' team='' name='' agent=claude role=assistant model='' effort='' perm=ask desc='' brief='' json=0 a
+  local -a rest=()
+  while (( $# )); do
+    case $1 in
+      --zone|-z)  zone=${2:?}; shift 2 ;;
+      --team|-T)  team=${2:?}; shift 2 ;;
+      --agent)    agent=${2:?}; shift 2 ;;
+      --role|-O)  role=${2:?}; shift 2 ;;
+      --model|-m) model=${2:?}; shift 2 ;;
+      --effort)   effort=${2:?}; shift 2 ;;
+      --plan)     perm=plan; shift ;;
+      --ask)      perm=ask; shift ;;
+      --description|-d) desc=${2:?}; shift 2 ;;
+      --brief)    brief=${2:?}; shift 2 ;;
+      --json)     json=1; shift ;;
+      *)          rest+=("$1"); shift ;;
+    esac
+  done
+  name=${rest[0]:-}
+  _type_scope "$zone" "$team"
+  case $sub in
+    add|set)
+      [[ "$name" =~ $TYPE_NAME_RE ]] || die "$(_t "Usage: prama-agent fleet type add <name> --role assistant|executor|reader --agent claude|agy [--model M] [--plan] --brief \"…\" (name: a-z, 0-9, -)")"
+      is_in "$agent" "${AGENTS[@]}" || die "$(_t "Agent not available: '%s'" "$agent")"
+      case $role in executor|reader|assistant) ;; *) die "$(_t 'A type is an executor, a reader or an assistant.')" ;; esac
+      [ -z "$model" ] || valid_model "$model" || die "$(_t "Invalid model: '%s'" "$model")"
+      [[ "$effort" =~ ^(|low|medium|high|xhigh|max)$ ]] || die "--effort: low|medium|high|xhigh|max"
+      [ "$role" = reader ] && perm=plan
+      desc=${desc//[$'\r\n']/ }
+      ensure_private_dir "$PRAMA_STATE_HOME/types"; ensure_private_dir "${TY_DIR%/*}"; ensure_private_dir "$TY_DIR"
+      ( umask 077
+        printf 'AGENT=%s\nROLE=%s\nMODEL=%s\nEFFORT=%s\nPERM=%s\nDESCRIPTION=%s\n' "$agent" "$role" "$model" "$effort" "$perm" "${desc:0:200}" > "$TY_DIR/$name.env"
+        if [ -n "$brief" ]; then printf '%s\n' "${brief:0:8000}" > "$TY_DIR/$name.brief"; else rm -f "$TY_DIR/$name.brief"; fi )
+      bus_event type "$(_fleet_caller)" "$TY_ZONE/$TY_TEAM" "$name: $role $agent${model:+ $model} $perm"
+      ok "$(_t "Agent type '%s' saved for team %s · %s: prama-agent fleet spawn --type %s" "$name" "$TY_ZONE" "$TY_TEAM" "$name")" ;;
+    rm|remove|del)
+      [[ "$name" =~ $TYPE_NAME_RE ]] && [ -f "$TY_DIR/$name.env" ] || die "$(_t "Unknown agent type: '%s'" "$name")"
+      rm -f "$TY_DIR/$name.env" "$TY_DIR/$name.brief"
+      ok "$(_t "Agent type '%s' removed." "$name")" ;;
+    list|ls|show)
+      local f n sep='' first
+      (( json )) && printf '['
+      (( json )) || printf ' %s%s%s\n' "$C_BOLD" "$(_t 'Agent types of team %s · %s' "$TY_ZONE" "$TY_TEAM")" "$C_OFF"
+      n=0
+      for f in "$TY_DIR"/*.env; do
+        [ -f "$f" ] || continue
+        a=$(basename "$f" .env)
+        [ -z "$name" ] || [ "$a" = "$name" ] || continue
+        type_load "$a" || continue
+        n=$(( n + 1 ))
+        if (( json )); then
+          printf '%s{"name":"%s","role":"%s","agent":"%s","model":"%s","effort":"%s","perm":"%s","description":"%s","brief":"%s"}' "$sep" \
+            "$a" "${TY[ROLE]:-}" "${TY[AGENT]:-}" "$(json_escape "${TY[MODEL]:-}")" "${TY[EFFORT]:-}" "${TY[PERM]:-}" \
+            "$(json_escape "${TY[DESCRIPTION]:-}")" "$(json_escape "$TY_BRIEF")"
+          sep=','
+        else
+          first=${TY_BRIEF%%$'\n'*}
+          printf '  %s%-18s%s %s · %s%s · %s\n     %s%s%s\n' "$C_LIVE" "$a" "$C_OFF" "$(role_badge "${TY[ROLE]:-}")" "${TY[AGENT]:-}" \
+            "${TY[MODEL]:+ ${TY[MODEL]}}" "${TY[PERM]:-ask}" "$C_MUTED" "$(truncate_cols "${TY[DESCRIPTION]:-$first}" 90)" "$C_OFF"
+        fi
+      done
+      if (( json )); then printf ']\n'
+      elif (( n == 0 )); then printf '  %s\n' "$(_t '(none yet: prama-agent fleet type add <name> --role assistant --brief "…")')"; fi ;;
+    *) die "$(_t 'Usage: prama-agent fleet type [list|add|rm] …')" ;;
+  esac
 }
 
 subcmd_fleet() {
@@ -518,6 +641,7 @@ subcmd_fleet() {
     restart)        _fleet_restart "$@" ;;
     agents|accounts) _fleet_agents "$@" ;;
     presets)        _fleet_presets ;;
+    type|types)     _fleet_type "$@" ;;
     models)         _fleet_models "$@" ;;
     watchdog|watch) _fleet_watchdog "$@" ;;
     hooks)          _fleet_hooks "$@" ;;

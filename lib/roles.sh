@@ -276,6 +276,10 @@ instead of doing it yourself:
 The operator is told it is waiting (and can jump to it with ${PRAMA_ASSIST_KEY:-M-o}); they talk to it
 directly, it reports to you with bus report. Do not assign it tasks or close it while the operator
 uses it; --plan makes it read-only.
+Agent types: save the kinds of agents your work needs (a code executor, a CLI guide, a marketing
+assistant…) once, then launch them by name; the operator sees them in 'prama-agent fleet type list':
+  prama-agent fleet type add <type> --role assistant|executor|reader --agent claude|agy [--model M] [--plan] --brief "<…>"
+  prama-agent fleet spawn --type <type> --name <short-name> [--brief "<what is specific this time>"]
 Limit of simultaneous agents: ${PRAMA_FLEET_MAX:-8}.$wt_text$close_text
 EOF
       ;;
@@ -404,6 +408,11 @@ en vez de hacerlo tú:
 Al operador se le avisa que lo espera (y salta a él con ${PRAMA_ASSIST_KEY:-M-o}); le habla directamente y
 el asistente te reporta con bus report. No le asignes tareas ni lo cierres mientras el operador lo usa;
 --plan lo deja de solo lectura.
+Tipos de agente: guarda una vez los tipos de agente que necesita tu trabajo (un ejecutor de código, una
+guía de la CLI, un asistente de marketing…) y luego lánzalos por nombre; el operador los ve en
+'prama-agent fleet type list':
+  prama-agent fleet type add <tipo> --role assistant|executor|reader --agent claude|agy [--model M] [--plan] --brief "<…>"
+  prama-agent fleet spawn --type <tipo> --name <nombre-corto> [--brief "<lo específico de esta vez>"]
 Límite de agentes simultáneos: ${PRAMA_FLEET_MAX:-8}.$wt_text$close_text
 EOF
       ;;
