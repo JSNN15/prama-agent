@@ -440,7 +440,7 @@ _fleet_watchdog() {
     start)  watchdog_ensure force && ok "$(_t 'Watchdog running (%s).' "$(watchdog_session)")" ;;
     stop)   tmx_kill "$(watchdog_session)" && ok "$(_t 'Watchdog stopped.')" ;;
     logs)   tmx_capture "$(watchdog_session)" "${2:-60}" ;;
-    tick)   declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=(); watchdog_tick ;;   # one pass (scripts, cron, tests)
+    tick)   declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=(); watchdog_tick ;;   # one pass (scripts, cron, tests)
     status) if watchdog_running; then ok "$(_t 'Watchdog running (%s).' "$(watchdog_session)")"
             else warn "$(_t 'Watchdog stopped (it starts by itself when an agent is launched).')"; fi ;;
     *)      die "$(_t 'Usage: prama-agent fleet watchdog [status|start|stop|logs|tick]')" ;;

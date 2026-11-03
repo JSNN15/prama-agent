@@ -368,6 +368,8 @@ def dot(s):
         return "🟢"
     if st in ("BLOCKED",):
         return "🔴"
+    if st in ("WAITING",):
+        return "🟡"
     if st in ("READY", "DAEMON", "SHELL"):
         return "●"
     return "○"
@@ -404,6 +406,8 @@ def needs_attention(d):
         return _("blocked") + (" (%s)" % d["blocked_reason"] if d.get("blocked_reason") else "")
     if st == "DEAD":
         return _("stopped")
+    if st == "WAITING":
+        return _("waiting for your answer on its screen")
     if quota_peak(d.get("quota")) >= QUOTA_ALERT:
         return _("quota at %d%%") % quota_peak(d.get("quota"))
     return ""

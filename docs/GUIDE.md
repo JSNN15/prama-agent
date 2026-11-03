@@ -311,6 +311,10 @@ prama-agent fleet hooks status               # health hooks per agent CLI
   apply when an agent uses the top-level commands (`stop`, `restart`, `send`, a direct
   `prama-agent <agent> <zone>` launch, which can never create a coordinator); `stop --all` is yours
   only. Every action is logged on the bus.
+- **Dialogs are yours.** A session showing a permission or a question is `WAITING`: nothing is typed into
+  it, because in Claude Code Enter on a permission dialog means *Yes*. Its messages wait in the queue, an
+  agent can never answer it, `prama-agent send` refuses unless you add `--force`, and if it stays open
+  `PRAMA_WAIT_ALERT` seconds (120) you are told once.
 - **Restarts keep the configuration.** `prama-agent restart`, `fleet restart` and Telegram's restart
   button relaunch the agent in the same pane from its saved spec (model, preset, permissions changed
   with `fleet edit` included) and resume its conversation; a Claude conversation that never got a
@@ -379,7 +383,10 @@ sender's own team (or, for an agent outside teams, its zone). Text is only typed
 ready or working, never into a plain shell; anything else is queued (Maildir queues, multi-consumer
 safe) with its sender (`[TASK FROM <session>]`), and the watchdog delivers it once the agent is ready.
 Control characters are never typed. A usage-limit block is retried after `PRAMA_BLOCK_TTL` (15 min);
-`prama-agent send` types the text as is, without those rules.
+`prama-agent send` types the text as is, without those rules. `assign` tells you it typed the task;
+add `--wait [seconds]` when the next step depends on it: it returns once the CLI's own hook saw the prompt
+submitted, and exit code 3 when it was only typed or queued (it never sends again: a timeout does not prove
+the message was lost).
 
 agy has no system-prompt flag, so a new agy conversation gets its role prompt (bus, team, branch,
 plan) as its first message; a resumed one already has it.
@@ -510,6 +517,7 @@ the menu, the tmux status bar of every agent and the fzf inspector. Both are als
 | `PRAMA_SEND_DELAY` | `0.3` | pause between pasting a message into an agent and pressing Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | how long `fleet agents` reports an account blocked by a 429 (s) |
 | `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` / `PRAMA_ASSIST_KEY` | `M-m` / `M-a` / `M-c` / `M-o` | navigation keys inside tmux |
+| `PRAMA_WAIT_ALERT` | `120` | seconds a dialog stays open before you are told |
 | `PRAMA_HUMAN_HOLD` / `PRAMA_ASSIST_HOLD` | `20` / `180` | seconds bus messages wait after you type in an agent / an assistant |
 | `PRAMA_ASSIST_OPEN` / `PRAMA_ASSIST_IDLE` | `notify` / `60` | `switch`: take an idle operator (seconds without typing) to a new assistant |
 | `PRAMA_ASSIST_PRIVATE` | `1` | `0` lets other agents read an assistant's screen |

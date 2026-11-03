@@ -319,6 +319,10 @@ prama-agent fleet hooks status               # hooks de salud de cada CLI
   Las mismas reglas valen cuando un agente usa los comandos de primer nivel (`stop`, `restart`, `send`,
   un lanzamiento directo `prama-agent <agente> <zona>`, que nunca puede crear un coordinador);
   `stop --all` es solo tuyo. Cada acción queda registrada en el bus.
+- **Los diálogos son tuyos.** Una sesión que muestra un permiso o una pregunta queda en `WAITING`: no se
+  escribe nada en ella, porque en Claude Code Enter sobre un diálogo de permiso significa *Sí*. Sus mensajes
+  esperan en la cola, un agente nunca puede responderlo, `prama-agent send` se niega salvo que agregues
+  `--force`, y si sigue abierto `PRAMA_WAIT_ALERT` segundos (120) se te avisa una vez.
 - **Los reinicios conservan la configuración.** `prama-agent restart`, `fleet restart` y el botón de
   reinicio de Telegram relanzan el agente en el mismo panel desde su configuración guardada (incluido lo
   que cambiaste con `fleet edit`) y retoman su conversación; una conversación de Claude que nunca
@@ -388,7 +392,10 @@ alcanza al propio equipo de quien envía (o, para un agente sin equipo, a su zon
 agentes listos o trabajando, nunca en una shell; lo demás queda en cola (colas Maildir, seguras con
 varios consumidores) con su remitente (`[TAREA DE <sesión>]`) y el watchdog lo entrega cuando el
 agente está listo. Los caracteres de control nunca se teclean. Un bloqueo por límite de uso se
-reintenta tras `PRAMA_BLOCK_TTL` (15 min); `prama-agent send` escribe el texto tal cual, sin esas reglas.
+reintenta tras `PRAMA_BLOCK_TTL` (15 min); `prama-agent send` escribe el texto tal cual, sin esas reglas. `assign` te dice que escribió la tarea;
+agrega `--wait [segundos]` si el siguiente paso depende de eso: vuelve cuando el hook del propio CLI vio
+enviado el prompt, y da código de salida 3 si solo quedó escrita o en cola (nunca la envía de nuevo: un
+tiempo agotado no prueba que el mensaje se perdió).
 
 agy no tiene una opción de prompt de sistema: una conversación nueva de agy recibe su prompt de rol
 (bus, equipo, rama, plan) como primer mensaje; una retomada ya lo tiene.
@@ -527,6 +534,7 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_SEND_DELAY` | `0.3` | pausa entre pegar un mensaje en un agente y presionar Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | cuánto tiempo `fleet agents` muestra bloqueada una cuenta tras un 429 (s) |
 | `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` / `PRAMA_ASSIST_KEY` | `M-m` / `M-a` / `M-c` / `M-o` | teclas de navegación en tmux |
+| `PRAMA_WAIT_ALERT` | `120` | segundos que un diálogo sigue abierto antes de avisarte |
 | `PRAMA_HUMAN_HOLD` / `PRAMA_ASSIST_HOLD` | `20` / `180` | segundos que esperan los mensajes del bus después de que escribes en un agente / un asistente |
 | `PRAMA_ASSIST_OPEN` / `PRAMA_ASSIST_IDLE` | `notify` / `60` | `switch`: lleva a un operador inactivo (segundos sin teclear) al asistente nuevo |
 | `PRAMA_ASSIST_PRIVATE` | `1` | `0` deja que otros agentes lean la pantalla de un asistente |

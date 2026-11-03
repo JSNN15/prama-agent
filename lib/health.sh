@@ -53,7 +53,7 @@ hook_ingest() {
       model=$(json_field "$json" model)
       health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=idle "${sid:+AGENT_SID=$sid}" "${model:+MODEL=$model}" ;;
     UserPromptSubmit)
-      health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=working "${sid:+AGENT_SID=$sid}" ;;
+      health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=working "PROMPT_TS=${EPOCHSECONDS:-$(date +%s)}" "${sid:+AGENT_SID=$sid}" ;;
     Stop)
       health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=idle "${sid:+AGENT_SID=$sid}" ;;
     StopFailure)
@@ -91,7 +91,7 @@ _hook_ingest_agy() {
     SessionStart)
       health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=idle "${sid:+AGENT_SID=$sid}" "${model:+MODEL=$model}" ;;
     PreInvocation)
-      health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=working "${sid:+AGENT_SID=$sid}" "${model:+MODEL=$model}" ;;
+      health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=working "PROMPT_TS=${EPOCHSECONDS:-$(date +%s)}" "${sid:+AGENT_SID=$sid}" "${model:+MODEL=$model}" ;;
     Stop)
       local why err info
       why=$(json_field "$json" terminationReason)
@@ -333,6 +333,7 @@ _watch_log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 watchdog_tick() {
   local s st info reason detail prev key msg
   declare -A seen=()
+  declare -p W_WAIT >/dev/null 2>&1 || declare -gA W_WAIT=()
   while IFS= read -r s; do
     seen[$s]=1
     # With the pane's command: a supervisor that dropped to a plain shell is SHELL, never READY
@@ -376,6 +377,23 @@ watchdog_tick() {
       esac
       W_PREV[$s]=$key
       W_READY[$s]=0
+    fi
+
+    # A dialog only a person can answer: told once, if it stays open (agents in ask mode hit many,
+    # most are answered at once).
+    if [ "$st" = WAITING ]; then
+      local wnow=${EPOCHSECONDS:-$(date +%s)}
+      [ -n "${W_WAIT[$s]:-}" ] || W_WAIT[$s]=$wnow
+      if [ "${W_WAIT[$s]}" != told ] && (( wnow - W_WAIT[$s] >= ${PRAMA_WAIT_ALERT:-120} )); then
+        W_WAIT[$s]=told
+        _tv msg '? %s waits for an answer on its screen' "$s"; _watch_log "$msg"
+        bus_event waiting watchdog "$s" "dialog"
+        _tv msg "[PRAMA ALERT] '%s' is waiting for an answer on its screen (a permission or a question), and only a person can give it: prama-agent attach %s" "$s" "$s"
+        _watch_alert "$s" "$msg"
+        _watch_tell_terminals "$msg"
+      fi
+    else
+      unset 'W_WAIT[$s]'
     fi
 
     # Queued work for interactive agents: deliver one task once the agent has been READY for
@@ -446,6 +464,15 @@ _watch_snapshot() {
   return 0
 }
 
+# A message on every terminal the operator has attached (not the cockpit's nested viewers).
+_watch_tell_terminals() {
+  local cl term
+  while IFS='|' read -r cl term; do
+    [ -n "$cl" ] && [[ "$term" != tmux* ]] && tmx display-message -c "$cl" "$1" 2>/dev/null
+  done < <(tmx list-clients -F '#{client_name}|#{client_termname}' 2>/dev/null)
+  return 0
+}
+
 # Sessions that ended and nobody closed through prama: told once, with the way back. Read from disk,
 # so a watchdog restarted in the meantime still sees them.
 _watch_closed() {
@@ -474,10 +501,7 @@ _watch_closed() {
     else
       _tv msg '[PRAMA ALERT] These sessions ended and nobody closed them through prama: %s. Bring them back with their conversations: prama-agent restore --all' "${gone[*]}"
     fi
-    local cl term
-    while IFS='|' read -r cl term; do
-      [ -n "$cl" ] && [[ "$term" != tmux* ]] && tmx display-message -c "$cl" "$msg" 2>/dev/null
-    done < <(tmx list-clients -F '#{client_name}|#{client_termname}' 2>/dev/null)
+    _watch_tell_terminals "$msg"
     declare -F telegram_notify >/dev/null && telegram_notify "$msg" alert
   fi
   if (( now - ${W_PRUNE_AT:-0} >= 3600 )); then W_PRUNE_AT=$now; closed_prune; fi
@@ -542,7 +566,7 @@ _watch_quota_alerts() {
 }
 
 watchdog_loop() {
-  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=()
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=()
   local interval=${PRAMA_WATCH_INTERVAL:-5} msg
   [[ "$interval" =~ ^[0-9]+$ ]] && (( interval > 0 )) || interval=5
   tmx select-pane -t "=$(watchdog_session):" -T "watchdog" 2>/dev/null || true

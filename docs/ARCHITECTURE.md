@@ -52,7 +52,9 @@ creates private dirs).
 8. Functions that can fail inside `$(...)` must be followed by `|| exit 1` / `|| return 1` — `die`
    only exits the subshell.
 9. **Never type into an agent that is not READY/WORKING, nor over the operator** (`bus_can_inject`:
-   it holds messages while a human typed in the session lately, `bus_operator_engaged`; it reads the pane's
+   it holds messages while a human typed in the session lately, `bus_operator_engaged`; a session showing
+   a dialog only a person can answer is WAITING, and an agent can never type there, because Enter would
+   answer it (`screen_dialog`; `send --force` is the operator's alone); it reads the pane's
    command: a supervisor dropped to a plain shell is SHELL); BLOCKED agents get a queue. `tmx_send`
    types text only (control characters become spaces) and queued text carries its real sender.
    Because a wrong BLOCKED stops an agent's queue, screen detection is conservative: typed messages are

@@ -59,6 +59,16 @@ The e2e suite builds its own tmux socket (`prama-test-$$`), `HOME`, state dir an
 - `die` inside `$(...)` only exits the subshell: follow such calls with `|| exit 1` / `|| return 1`.
 - Comments in English; 2-space indent; `set -u` is on in the entrypoint (guard optional vars).
 
+## Agent CLI facts already paid for
+
+- In Claude Code, Enter on a permission dialog means **Yes**, whatever was pasted first: never type into
+  a `WAITING` session. On the folder-trust dialog the cursor starts on "No, exit".
+- With no flag, `claude` takes the account's default mode, which can be auto mode (no prompts).
+- `claude` refuses to start under `CLAUDECODE`: anything launched from a Claude Code session needs a
+  clean environment (`env -i`, or the generated tmux.conf for prama's server).
+- Screen rules change with the CLIs: `tests/fixtures/screens/` holds real captures. Add one when a rule
+  changes, and do not write a rule from memory.
+
 ## tmux pitfalls already paid for
 
 - Exact targets depend on the command's target *type*: `has-session`/`kill-session`/`switch-client`

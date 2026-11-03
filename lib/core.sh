@@ -275,10 +275,19 @@ tmx_send() {
   # Control characters would reach the CLI as keystrokes (ESC ends a bracketed paste, ESC [ Z is
   # Shift+Tab — Claude's permission mode —, ^C, CR submits early): text only.
   text=${text//[[:cntrl:]]/ }
-  printf '%s' "$text" | tmx load-buffer -b "$buf" - || return 1
-  tmx paste-buffer -p -d -b "$buf" -t "=$s:" || { tmx delete-buffer -b "$buf" 2>/dev/null; return 1; }
-  sleep "${PRAMA_SEND_DELAY:-0.3}"
-  tmx send-keys -t "=$s:" Enter || return 1
+  # One sender at a time: another message landing between this text and its Enter would merge with it.
+  local lock rc=0; lock="$(state_file "$s").send.lock"
+  [ -d "${lock%/*}" ] || lock=/dev/null
+  {
+    command -v flock >/dev/null 2>&1 && flock 7
+    if ! printf '%s' "$text" | tmx load-buffer -b "$buf" -; then rc=1
+    elif ! tmx paste-buffer -p -d -b "$buf" -t "=$s:"; then tmx delete-buffer -b "$buf" 2>/dev/null; rc=1
+    else
+      sleep "${PRAMA_SEND_DELAY:-0.3}"
+      tmx send-keys -t "=$s:" Enter || rc=1
+    fi
+  } 7>>"$lock"
+  (( rc == 0 )) || return 1
   # Lets the watchdog submit this message if it still sits in the prompt (never the operator's own).
   [ -f "$(state_file "$s")" ] && state_set "$s" SENT_TS="${EPOCHSECONDS:-$(date +%s)}"
   return 0
@@ -501,7 +510,7 @@ tmux_at_least() {
 }
 
 # Writes the managed tmux config for the prama server (never ~/.tmux.conf) and reloads it.
-TMUX_CONF_VERSION="prama-agent-managed-v6.8.1"
+TMUX_CONF_VERSION="prama-agent-managed-v6.12.0"
 ensure_tmux_conf() {
   local force=${1:-0}
   # The theme and the language are part of the generated file: changing either regenerates it.
@@ -597,6 +606,19 @@ set-environment -gu PRAMA_WT_BRANCH
 set-environment -gu PRAMA_WT_DIR
 set-environment -gu PRAMA_SL_CACHE
 set-environment -gu IS_SANDBOX
+# A server started from inside a Claude Code session must not pass its identity on: claude refuses to
+# start under CLAUDECODE, and the others are that session's own.
+set-environment -gu CLAUDECODE
+set-environment -gu CLAUDE_PID
+set-environment -gu CLAUDE_EFFORT
+set-environment -gu CLAUDE_CODE_ENTRYPOINT
+set-environment -gu CLAUDE_CODE_EXECPATH
+set-environment -gu CLAUDE_CODE_SESSION_ID
+set-environment -gu CLAUDE_CODE_CHILD_SESSION
+set-environment -gu CLAUDE_CODE_SESSION_ATTENDED
+set-environment -gu CLAUDE_CODE_BRIDGE_SESSION_ID
+set-environment -gu CLAUDE_CODE_MESSAGING_SOCKET
+set-environment -gu CLAUDE_CODE_MESSAGING_TOKEN
 
 # Navigation (works inside agents and the cockpit; the agent keeps running):
 #   $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent picker · $PRAMA_COCKPIT_KEY team cockpit ⇄ agent · $PRAMA_ASSIST_KEY assistant waiting
@@ -674,7 +696,7 @@ state_remove() {
   local f
   f=$(state_file "$1")
   session_archive "$1" "${2:-}"
-  rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md,brief} "$f.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock" 2>/dev/null || true
+  rm -f "$f" "${f%.env}".{args,health,quota,sl,prompt.md,brief} "$f.lock" "$f.send.lock" "${f%.env}.health.lock" "${f%.env}.quota.lock" 2>/dev/null || true
 }
 
 # state_set <session> KEY=VALUE...   (merge: replaces only the given keys, atomic, serialized)
@@ -968,7 +990,9 @@ get_host_telemetry() {
 }
 
 # Classifies what a session is doing from its last screen lines. Prints a STATE word:
-# DEAD | BOT | STANDBY | DAEMON | WORKING | SHELL | READY
+# DEAD | BOT | STANDBY | DAEMON | BLOCKED | WAITING | WORKING | SHELL | READY
+# WAITING: a dialog only a person can answer. Nothing is typed there: in Claude Code, Enter on a
+# permission dialog means "Yes", whatever was pasted first.
 detect_session_state() {
   local s=$1 pane_dead=${2:-0} pcmd=${3:-}
   if [ "$pane_dead" = "1" ]; then printf 'DEAD'; return; fi
@@ -979,7 +1003,8 @@ detect_session_state() {
   elif [[ "$snippet" == *"PRAMA_DAEMON"* ]]; then printf 'DAEMON'
   # A block reported by the CLI's own hooks wins over "Working…" text still on the screen.
   elif _hook_block_info "$s" >/dev/null; then printf 'BLOCKED'
-  elif [[ "$snippet" =~ esc\ to\ interrupt|Esc\ to\ cancel|Thinking|Working|Running…|Synthesizing ]]; then printf 'WORKING'
+  elif screen_dialog "$snippet"; then printf 'WAITING'
+  elif _screen_working "$snippet"; then printf 'WORKING'
   elif session_block_info "$s" "$snippet" >/dev/null; then printf 'BLOCKED'
   elif [[ "$pcmd" =~ ^(bash|sh|zsh|fish)$ ]] && ! session_has_agent_process "$s"; then printf 'SHELL'
   else printf 'READY'
@@ -998,6 +1023,64 @@ BLOCK_PATTERNS=(
   'model|model not found|model_not_found|unrecognized_model|issue with the selected model|not a valid model|select model|choose a model'
 )
 
+# _screen_own_lines <text> → the screen without the messages typed into the agent (see below).
+_screen_own_lines() {
+  printf '%s\n' "$1" | strip_ansi_stream | LC_ALL=C awk '
+      /^[ \t]*$/ { next }
+      /^([ \t|]|│)*(>|❯|›)/ || /\[(ALERTA PRAMA|PRAMA|TAREA|REPORTE|BROADCAST|TASK|REPORT|QUEUED TASK)/ { msg = 1; next }
+      msg && (/^[ \t]*(─|━|═|-)(─|━|═|-)(─|━|═|-)/ || /^[ \t]*(⏺|●|✻|✶|✳|⎿|╭|╰)/) { msg = 0 }
+      !msg { print }'
+}
+
+# _screen_working <text> → 0 when the CLI's own lines say it is in the middle of a turn. The words
+# alone are not enough: an agent writes "Working directory…" too. Rules from real screens and from
+# Herdr's agent manifests (Apache-2.0): Claude's footer and spinner line, agy's lowercase footer and
+# Braille spinner.
+_screen_working() {
+  local own; own=$(_screen_own_lines "$1")
+  [[ "${own,,}" == *"esc to interrupt"* ]] && return 0
+  # Byte-wise (LC_ALL=C), so it means the same in every locale: a range like [⠁-⣿] is an error in
+  # some ("Invalid collation character"). Braille is U+2800-28FF: E2 A0-A3 80-BF.
+  LC_ALL=C grep -qE -e '^[[:space:]]*(─){3,}[[:space:]]*esc to cancel' \
+           -e $'^[[:space:]]*(\xe2[\xa0-\xa3][\x80-\xbf])+[[:space:]]+[^[:space:]]' \
+           -e '^[[:space:]]*(✻|✶|✳|✽|✢|·|\*)[[:space:]]+[^[:space:]].*…' \
+           -e '^[[:space:]]*([^[:alnum:][:space:]]+[[:space:]]+)?(Thinking|Working|Synthesizing|Running)(…|\.\.\.)' <<< "$own"
+}
+
+# screen_dialog <text> → 0 when the screen shows a dialog that only a person can answer (a permission,
+# a question). Anchored to what a CLI draws at the bottom, so text that merely quotes one does not count:
+# the keys footer in the last lines, or the question with its numbered options. The folder-trust dialog
+# is left to the BLOCKED rules, which name it.
+screen_dialog() {
+  local low=${1,,} line q=0 opt=0
+  local -a all=()
+  mapfile -t all < <(printf '%s\n' "$low" | grep -v '^[[:space:]]*$')
+  (( ${#all[@]} )) || return 1
+  [[ "$low" == *"trust this folder"* || "$low" == *"do you trust"* ]] && return 1
+  local n=${#all[@]} i stop
+  stop=$(( n > 5 ? n - 5 : 0 ))
+  # From the bottom up: an input box below means the agent is at its prompt, and whatever looks like a
+  # dialog above it is only being quoted. (The dialog's own options start with "❯ 1.")
+  for (( i = n - 1; i >= stop; i-- )); do
+    line=${all[i]}
+    [[ "$line" =~ ^[[:space:]]*(─|━|═)(─|━|═)(─|━|═) ]] && return 1
+    [[ "$line" =~ ^[[:space:]]*❯ && ! "$line" =~ ^[[:space:]]*❯[[:space:]]*[0-9]+\. ]] && return 1
+    # Claude Code: "Esc to cancel · Tab to amend", "Enter to select · … to navigate · Esc to cancel"
+    [[ "$line" =~ ^[[:space:]]*(esc\ to\ cancel|enter\ to\ confirm|enter\ to\ select)[[:space:]]+·[[:space:]] ]] && return 0
+  done
+  for (( i = n > 2 ? n - 2 : 0; i < n; i++ )); do
+    line=${all[i]}
+    # agy: its keys footer ("↑↓ navigate · tab amend", "… · esc skip")
+    [[ "$line" == *navigate* && ( "$line" == *"tab amend"* || "$line" == *"esc skip"* ) ]] && return 0
+  done
+  for line in "${all[@]}"; do
+    [[ "$line" =~ ^[[:space:]]*(do\ you\ want\ to\ proceed\?|do\ you\ want\ to\ allow\ this\ connection\?|requesting\ permission\ for:) ]] && q=1
+    [[ "$line" =~ ^[[:space:]]*(❯[[:space:]]*)?1\.[[:space:]] ]] && opt=1
+    [[ "$line" =~ ^[[:space:]]*mcp\ server\ .*requests\ your\ input[[:space:]]*$ ]] && return 0
+  done
+  (( q && opt ))
+}
+
 # screen_block_reason <text> [reasons_re] → prints "reason|matching line"; returns 1 when nothing
 # matches. reasons_re limits the categories considered (e.g. 'login|trust|model').
 screen_block_reason() {
@@ -1009,11 +1092,7 @@ screen_block_reason() {
   # themselves (a narrow cockpit pane), so its continuation lines carry no marker.
   # Byte-wise alternations (LC_ALL=C): mawk, the default awk on Debian/Ubuntu, does not handle
   # multibyte characters inside [...] brackets.
-  mapfile -t lines < <(printf '%s\n' "$text" | strip_ansi_stream | LC_ALL=C awk '
-      /^[ \t]*$/ { next }
-      /^([ \t|]|│)*(>|❯|›)/ || /\[(ALERTA PRAMA|PRAMA|TAREA|REPORTE|BROADCAST|TASK|REPORT|QUEUED TASK)/ { msg = 1; next }
-      msg && (/^[ \t]*(─|━|═|-)(─|━|═|-)(─|━|═|-)/ || /^[ \t]*(⏺|●|✻|✶|✳|⎿|╭|╰)/) { msg = 0 }
-      !msg { print }' | tail -n 8)
+  mapfile -t lines < <(_screen_own_lines "$text" | tail -n 8)
   for entry in "${BLOCK_PATTERNS[@]}"; do
     reason=${entry%%|*} pats=${entry#*|}
     [ -z "$only" ] || [[ "$reason" =~ ^($only)$ ]] || continue

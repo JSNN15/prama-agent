@@ -1144,6 +1144,86 @@ PRAMA_CLOSED_KEEP=1 "$BIN" restore >/dev/null 2>&1
 assert_true "Only the newest PRAMA_CLOSED_KEEP stay saved, and never a running session's" "[ \$($BIN restore --json | jq 'length') -le 1 ] && [ -f '$STATE/bus/closed/tp-rc/spec.env' ]"
 "$BIN" stop --all -y >/dev/null 2>&1
 
+section "Dialogs only a person can answer, and delivery you can prove"
+"$BIN" stop --all -y >/dev/null 2>&1
+LIBS='for m in core ui agents roles bus swarm worktrees plan health; do source "'"$REPO_DIR"'/lib/$m.sh"; done; prama_init >/dev/null 2>&1'
+EV="$STATE/bus/events.jsonl"
+FX="$REPO_DIR/tests/fixtures/screens"   # real Claude Code screens, captured from the CLI
+is_dialog()  { bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; if screen_dialog "$1"; then echo yes; else echo no; fi' _ "$1"; }
+is_working() { LC_ALL=C.UTF-8 bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; if _screen_working "$1"; then echo yes; else echo no; fi' _ "$1" 2>&1; }
+assert_eq "A real Claude permission dialog is one" "yes" "$(is_dialog "$(cat "$FX/claude-permission-dialog.txt")")"
+assert_eq "…seen in the last lines, as the state check reads it" "yes" "$(is_dialog "$(grep -v '^ *$' "$FX/claude-permission-dialog.txt" | tail -n 12)")"
+assert_eq "Claude at its prompt is not" "no" "$(is_dialog "$(cat "$FX/claude-ready.txt")")"
+assert_eq "…nor after a finished turn" "no" "$(is_dialog "$(cat "$FX/claude-idle-after-turn.txt")")"
+assert_eq "…and neither of them reads as working" "no no" "$(is_working "$(cat "$FX/claude-ready.txt")") $(is_working "$(cat "$FX/claude-idle-after-turn.txt")")"
+assert_eq "The folder-trust dialog stays a block that names itself" "no" "$(is_dialog "$(cat "$FX/claude-trust-dialog.txt")")"
+assert_contains "…with its reason" "trust|" "$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; screen_block_reason "$1"' _ "$(cat "$FX/claude-trust-dialog.txt")")"
+quoted=$'● The dialog said:\n  Do you want to proceed?\n  1. Yes\n  Esc to cancel · Tab to amend\n──────────\n❯ \n──────────\n  ⏸ manual mode on · ? for shortcuts'
+assert_eq "A dialog quoted in the conversation, with the input box below, is not one" "no" "$(is_dialog "$quoted")"
+assert_eq "A question with its options is one, even with no keys footer" "yes" "$(is_dialog $'Do you want to proceed?\n❯ 1. Yes\n  2. No')"
+assert_eq "agy's footer (from Herdr's manifest; not checked against agy here)" "yes" "$(is_dialog $'Allow?\n↑↓ navigate · enter select · tab amend')"
+assert_eq "agy's lowercase working footer" "yes" "$(is_working $'──────── esc to cancel')"
+assert_eq "agy's Braille spinner" "yes" "$(is_working $'⠋ Planning the change')"
+assert_eq "Claude's spinner line" "yes" "$(is_working $'✻ Thinking… (3s)')"
+assert_eq "Claude's footer while working" "yes" "$(is_working $'⏵⏵ bypass permissions on · esc to interrupt')"
+assert_eq "…in any locale (a Braille range is an error in some, which voided the whole rule)" "yes yes" \
+  "$(for l in C C.UTF-8; do LC_ALL=$l LANG=$l bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; if _screen_working "$1"; then printf "yes "; else printf "no "; fi' _ $'⠋ Planning the change' 2>&1; done | sed 's/ $//')"
+assert_eq "An agent writing the word is not working" "no" "$(is_working $'⏺ Working directory is clean.\nThinking about it, the tests pass.')"
+assert_eq "…nor text typed into it" "no" "$(is_working $'❯ press esc to interrupt it')"
+mock_ctl tp-dl interactive; mock_ctl tp-dl screen "$(cat "$FX/claude-permission-dialog.txt")"; "$BIN" claude alpha --bg --name tp-dl >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-dl:' | grep -q 'Tab to amend'"
+assert_eq "A session showing a dialog is WAITING" "WAITING" "$(st tp-dl .state)"
+"$BIN" bus assign tp-dl "tarea sobre el dialogo" >/dev/null 2>&1; sleep 0.5
+assert_not_contains "A task is never typed over a dialog (Enter would approve it)" "GOT:" "$($P capture-pane -p -t '=tp-dl:' -S -60)"
+assert_eq "…it waits in the queue" "1" "$(st tp-dl .queue)"
+"$BIN" bus broadcast "aviso general" >/dev/null 2>&1; sleep 0.5
+assert_eq "…a broadcast too" "2" "$(st tp-dl .queue)"
+mock_ctl tp-dc interactive; "$BIN" claude alpha --bg --name tp-dc >/dev/null
+out=$(PRAMA_SESSION=tp-dc "$BIN" send tp-dl "1" 2>&1); rc=$?
+assert_true "An agent can never answer another agent's dialog" "[ $rc -ne 0 ] && [[ \"\$out\" == *'solo una persona'* ]]"
+out=$("$BIN" send tp-dl "hola" 2>&1); rc=$?
+assert_true "…and send stops the operator too, saying why" "[ $rc -ne 0 ] && [[ \"\$out\" == *attach* ]]"
+assert_not_contains "…typing nothing" "GOT:" "$($P capture-pane -p -t '=tp-dl:' -S -60)"
+"$BIN" send tp-dl --force "a propósito" >/dev/null 2>&1
+assert_true "…unless told to" "wait_for 5 \"$P capture-pane -p -t '=tp-dl:' -S -60 | grep -q 'GOT: a propósito'\""
+out=$(PRAMA_WAIT_ALERT=0 bash -c "$LIBS"'; declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=(); watchdog_tick; watchdog_tick' 2>&1)
+assert_contains "The watchdog says when a dialog stays open" "espera una respuesta" "$out"
+assert_eq "…once" "1" "$(grep -c '"event":"waiting".*"to":"tp-dl"' "$EV")"
+out=$(PRAMA_WAIT_ALERT=9999 bash -c "$LIBS"'; declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=(); watchdog_tick' 2>&1)
+assert_not_contains "…and not while it is only a few seconds old (ask mode opens many)" "tp-dl espera" "$out"
+out=$("$BIN" claude alpha --ask --dry-run)
+assert_contains "ask names claude's mode: without it the account's default applies (it can be auto)" "--permission-mode default" "$out"
+out=$("$BIN" claude alpha --ask --dry-run -- --permission-mode acceptEdits)
+assert_not_contains "…unless the operator chose one" "--permission-mode default" "$out"
+assert_not_contains "yolo and plan keep theirs" "--permission-mode default" "$("$BIN" claude alpha --yolo --dry-run) $("$BIN" claude alpha --plan --dry-run)"
+assert_not_contains "agy has no such mode" "--permission-mode" "$("$BIN" agy alpha --ask --dry-run)"
+sock3="prama-test-env3-$$"
+PRAMA_TMUX_SOCKET=$sock3 CLAUDECODE=1 CLAUDE_CODE_MESSAGING_TOKEN=secreto "$BIN" claude alpha --bg --name tp-envc >/dev/null 2>&1
+assert_true "A server started from inside Claude Code does not pass its identity on" \
+  "tmux -L $sock3 has-session -t =tp-envc && ! tmux -L $sock3 show-environment -g CLAUDECODE >/dev/null 2>&1 && ! tmux -L $sock3 show-environment -g CLAUDE_CODE_MESSAGING_TOKEN >/dev/null 2>&1"
+tmux -L "$sock3" kill-server 2>/dev/null; rm -rf "$STATE/bus/state/tp-envc".* "$STATE/bus/closed/tp-envc"
+mock_ctl tp-dw interactive; "$BIN" claude alpha --bg --name tp-dw >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-dw:' | grep -q MOCK_AGENT"
+out=$("$BIN" bus assign tp-dw "sin hooks" --wait 1 2>&1); rc=$?
+assert_true "assign --wait says when an agent has no hooks to confirm with (exit code 3)" "[ $rc -eq 3 ] && [[ \"\$out\" == *hooks* ]]"
+printf '{"hook_event_name":"SessionStart","session_id":"dw"}' | PRAMA_SESSION=tp-dw "$BIN" --internal-hook claude
+sleep 1.1
+out=$("$BIN" bus assign tp-dw "no llega" --wait 1 2>&1); rc=$?
+assert_true "…and when nothing confirmed it" "[ $rc -eq 3 ] && [[ \"\$out\" == *'sin confirmar'* ]]"
+( sleep 1; printf '{"hook_event_name":"UserPromptSubmit","session_id":"dw"}' | PRAMA_SESSION=tp-dw "$BIN" --internal-hook claude ) &
+out=$("$BIN" bus assign tp-dw "sí llega" --wait 10 2>&1); rc=$?; wait
+assert_true "…and succeeds once the CLI's own hook saw the prompt submitted" "[ $rc -eq 0 ] && [[ \"\$out\" == *confirm* ]]"
+assert_true "…logged as confirmed" "grep -q '\"event\":\"confirmed\".*\"to\":\"tp-dw\"' '$EV'"
+out=$("$BIN" bus assign tp-dl "en cola" --wait 1 2>&1); rc=$?
+assert_true "…queued is not confirmed either" "[ $rc -eq 3 ]"
+assert_contains "Plain assign does not claim more than it knows" "escrita" "$("$BIN" bus assign tp-dc "algo" 2>&1)"
+mock_ctl tp-dk interactive; "$BIN" claude alpha --bg --name tp-dk >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-dk:' | grep -q MOCK_AGENT"
+bash -c "$LIBS"'; PRAMA_SEND_DELAY=0.4 tmx_send tp-dk "uno-uno" & PRAMA_SEND_DELAY=0.4 tmx_send tp-dk "dos-dos" & wait'
+wait_for 5 "[ \$($P capture-pane -p -t '=tp-dk:' -S -40 | grep -c '^GOT: ') -ge 2 ]"
+assert_eq "Two senders at once never merge their messages" "dos-dos uno-uno" "$($P capture-pane -p -t '=tp-dk:' -S -40 | sed -n 's/^GOT: //p' | sed 's/ *$//' | sort | xargs)"
+"$BIN" stop --all -y >/dev/null 2>&1
+
 section "UI engine"
 out=$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; str_width "ab"; echo; str_width "🤝 ab"; echo; str_width "✦ x"')
 assert_eq "Display width counts emoji as 2 columns" $'2\n5\n3' "$out"
