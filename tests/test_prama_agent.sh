@@ -1119,10 +1119,11 @@ assert_true "…but a coordinator can bring back its own agent" "[ $rc -eq 0 ] &
 wait_for 5 "$P capture-pane -p -t '=tp-rx:' | grep -q MOCK_AGENT"
 mock_ctl tp-ra interactive
 PRAMA_SESSION=tp-rc "$BIN" fleet spawn claude alpha --role assistant --name tp-ra --brief "Encargo que sobrevive" >/dev/null 2>&1
+mock_ctl tp-rz interactive; "$BIN" claude alpha --bg --name tp-rz >/dev/null
 $P kill-session -t =tp-rc; $P kill-session -t =tp-rx; $P kill-session -t =tp-ra
 wait_for 5 "! pgrep -f '$sid' >/dev/null && ! pgrep -f '$csid' >/dev/null"
-out=$(PRAMA_SESSION=tp-rx "$BIN" restore tp-rc 2>&1); rc=$?
-assert_true "…never a coordinator" "[ $rc -ne 0 ]"
+out=$(PRAMA_SESSION=tp-rz "$BIN" restore tp-rc 2>&1); rc=$?
+assert_true "…never a coordinator" "[ $rc -ne 0 ] && ! $P has-session -t =tp-rc 2>/dev/null"
 out=$("$BIN" restore tp-rx 2>&1); rc=$?
 assert_true "An agent whose coordinator is down waits for it (it would lose its team)" "[ $rc -ne 0 ] && [[ \"\$out\" == *tp-rc* ]]"
 out=$("$BIN" restore --all 2>&1); rc=$?
