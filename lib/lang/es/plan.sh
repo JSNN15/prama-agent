@@ -83,4 +83,5 @@ I18N+=(
   ['%s: the acceptance check failed (exit %d).']='%s: la verificación de aceptación falló (código %d).'
   ['%s has no acceptance check: prama-agent plan set %s accept="<command>".']='%s no tiene verificación de aceptación: prama-agent plan set %s accept="<comando>".'
   ['Usage: prama-agent plan verify <id> [--done]']='Uso: prama-agent plan verify <id> [--done]'
+  ['%s'\''s owner (%s) is no longer running and its worktree is unknown: merge its branch first, then verify on the base.']='El dueño de %s (%s) ya no está corriendo y no se sabe cuál es su worktree: integra primero su rama y luego verifica sobre la base.'
 )

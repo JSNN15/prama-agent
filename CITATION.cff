@@ -9,8 +9,8 @@ authors:
     country: CL
 repository-code: "https://github.com/JSNN15/prama-agent"
 license: Apache-2.0
-version: 6.8.0
-date-released: 2026-11-02
+version: 6.8.1
+date-released: 2026-11-03
 keywords:
   - coding agents
   - claude code

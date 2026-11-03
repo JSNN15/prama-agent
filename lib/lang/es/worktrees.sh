@@ -54,4 +54,9 @@ I18N+=(
   ['Pull request already open, now updated: %s']='El pull request ya estaba abierto y quedó actualizado: %s'
   ['Could not open the pull request: %s']='No se pudo abrir el pull request: %s'
   ['Pull request opened: %s']='Pull request abierto: %s'
+  ['No live team has a worktree on branch '\''%s'\''.']='Ningún equipo vivo tiene un worktree en la rama '\''%s'\''.'
+  ['Could not read the current commit of %s.']='No se pudo leer el commit actual de %s.'
+  ['The tests failed after merging %s and the merge could NOT be undone: %s is not at %s any more. Fix it by hand: git -C %s reset --hard %s']='Los tests fallaron tras integrar %s y el merge NO se pudo deshacer: %s ya no está en %s. Corrígelo a mano: git -C %s reset --hard %s'
+  ['Kept %s: its worktree %s holds commits not merged into %s.']='Se conservó %s: su worktree %s tiene commits sin integrar en %s.'
+  ['Kept %s: git could not remove the worktree %s.']='Se conservó %s: git no pudo eliminar el worktree %s.'
 )

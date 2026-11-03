@@ -73,8 +73,9 @@ El coordinador recibe la lista de su equipo y el objetivo apenas está listo, de
 hacer crecer su equipo (`swarm <su zona> --workers agy:2`), cambiar modelos o cerrar agentes.
 
 El **cockpit** muestra al coordinador a la izquierda, sus agentes apilados a la derecha y el bus en vivo
-abajo; se reconstruye solo cuando entran o salen agentes. Dentro del tmux de prama, desde cualquier
-agente o desde el cockpit:
+abajo; se reconstruye cuando entran o salen agentes, y quien lo está mirando se queda en él. Los
+agentes sin equipo tienen su propio cockpit (`prama-cockpit-<zona>-solo` cuando la zona tiene equipos).
+Dentro del tmux de prama, desde cualquier agente o desde el cockpit:
 
 | Tecla | Botón de la barra | Acción |
 | --- | --- | --- |
@@ -108,7 +109,11 @@ prama-agent worktree sync prama-backend-seg-agy-2           # pone una rama al d
 - Los prompts de rol llevan el protocolo: los ejecutores hacen commit con evidencia y el coordinador
   reparte por archivos, integra una rama a la vez y pide a los demás ponerse al día.
 - `swarm stop` borra los worktrees limpios e integrados y **conserva** los que tienen trabajo sin
-  integrar o sin commit (`worktree clean` hace lo mismo después).
+  integrar o sin commit (`worktree clean` hace lo mismo después). Qué está integrado se decide sobre
+  lo que existe: también los commits propios del worktree, aunque su rama se haya renombrado o borrado.
+- Un ejecutor cerrado con `fleet kill` conserva su rama y su worktree: `worktree status` lo sigue
+  mostrando (por su rama) y `worktree merge prama/<equipo>/<nombre>` lo integra.
+- Un ejecutor que el coordinador suma con `fleet spawn` también recibe su propio worktree.
 - Dependencias: cada worktree es un checkout nuevo. Los `.env` se copian (`PRAMA_WORKTREE_COPY_FILES`);
   `PRAMA_WORKTREE_LINK="node_modules .venv"` comparte directorios pesados con el checkout principal en
   vez de reinstalarlos; si no, los ejecutores instalan lo que necesiten.
@@ -262,12 +267,19 @@ prama-agent fleet hooks status               # hooks de salud de cada CLI
 ```
 
 - **Watchdog.** Una sesión interna arranca con el primer agente y se detiene cuando la flota queda
-  vacía. Avisa al coordinador del equipo del agente (a los coordinadores de la zona si el agente no
-  tiene equipo) y a Telegram, si está configurado, cuando un agente se bloquea, se detiene, se recupera o cruza el umbral
-  de cuota, y entrega las tareas en cola cuando el agente vuelve a estar listo.
+  vacía. Avisa al coordinador del equipo del agente y a Telegram, si está configurado, cuando un agente
+  se bloquea, se detiene, se recupera o cruza el umbral de cuota, y entrega las tareas en cola cuando el
+  agente vuelve a estar listo. Los problemas de un coordinador, o de un agente sin equipo en una zona
+  con varios equipos, te llegan solo a ti (Telegram): ningún otro equipo se entera.
 - **Límites para los agentes** (contra errores; ver *Permisos y seguridad*). Un agente no puede actuar sobre sí mismo ni sobre un coordinador, solo
   dentro de su alcance (`PRAMA_FLEET_SCOPE=zone|children|all`), y `spawn` respeta `PRAMA_FLEET_MAX`.
-  Cada acción queda registrada en el bus.
+  Las mismas reglas valen cuando un agente usa los comandos de primer nivel (`stop`, `restart`, `send`,
+  un lanzamiento directo `prama-agent <agente> <zona>`, que nunca puede crear un coordinador);
+  `stop --all` es solo tuyo. Cada acción queda registrada en el bus.
+- **Los reinicios conservan la configuración.** `prama-agent restart`, `fleet restart` y el botón de
+  reinicio de Telegram relanzan el agente en el mismo panel desde su configuración guardada (incluido lo
+  que cambiaste con `fleet edit`) y retoman su conversación; una conversación de Claude que nunca
+  recibió un mensaje empieza de nuevo con el mismo id.
 - **Cambiar de modelo nunca altera tus valores por defecto.** prama reinicia el agente con `--model` en
   vez de escribir `/model`, que en Claude Code también reescribe tu modelo global. Los ids de modelo de
   agy se validan contra `agy models`, porque agy usa en silencio su modelo por defecto si el id no
@@ -303,10 +315,15 @@ prama-agent bus report "Endpoint listo; 18/18 tests ok"
 prama-agent bus watch                            # eventos en vivo
 ```
 
-`assign` acepta un nombre exacto de sesión o un rol y nunca hace coincidencias parciales. Solo se
-escribe en agentes listos o trabajando; lo demás queda en cola (colas Maildir, seguras con varios
-consumidores) y el watchdog lo entrega cuando el agente está listo. Un bloqueo por límite de uso se
-reintenta tras `PRAMA_BLOCK_TTL` (15 min); `prama-agent send` escribe tal cual, sin esas reglas.
+`assign` acepta un nombre exacto de sesión o un rol y nunca hace coincidencias parciales; un rol solo
+alcanza al propio equipo de quien envía (o, para un agente sin equipo, a su zona). Solo se escribe en
+agentes listos o trabajando, nunca en una shell; lo demás queda en cola (colas Maildir, seguras con
+varios consumidores) con su remitente (`[TAREA DE <sesión>]`) y el watchdog lo entrega cuando el
+agente está listo. Los caracteres de control nunca se teclean. Un bloqueo por límite de uso se
+reintenta tras `PRAMA_BLOCK_TTL` (15 min); `prama-agent send` escribe el texto tal cual, sin esas reglas.
+
+agy no tiene una opción de prompt de sistema: una conversación nueva de agy recibe su prompt de rol
+(bus, equipo, rama, plan) como primer mensaje; una retomada ya lo tiene.
 
 ## Presets
 

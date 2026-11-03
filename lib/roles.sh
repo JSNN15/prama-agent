@@ -33,7 +33,7 @@ build_role_system_prompt() {
   session_name=${session_name//[^A-Za-z0-9_-]/}
   zone=${zone//[^[:print:]]/}
   local team
-  team=$(state_get "$session_name" TEAM "${PRAMA_TEAM:-$PRAMA_DEFAULT_TEAM}")
+  team=$(state_get "$session_name" TEAM "${TEAM_HINT:-$PRAMA_DEFAULT_TEAM}")
   team=${team//[^a-z0-9-]/}
   local agents_list=${AGENTS[*]}
   agents_list=${agents_list// /|}
@@ -46,6 +46,23 @@ build_role_system_prompt() {
     es) _role_extra_es; _role_prompt_es ;;
     *)  _role_extra_en; _role_prompt_en ;;
   esac
+}
+
+# role_wants_prompt <role> <parent> → 0 when the agent gets a role prompt: every role but a plain
+# executor (the operator's own agent); an executor launched by a coordinator is in a team.
+role_wants_prompt() {
+  [ "$1" != executor ] || { [ -n "${2:-}" ] && [ "$2" != operator ] && [ "$(session_role "$2")" = coordinator ]; }
+}
+
+# session_role_prompt <session> → the role prompt rebuilt from the saved spec (restarts in place, the
+# runner): the same rule and the same team facts (branch, base, isolation) as the first launch.
+session_role_prompt() {
+  local s=$1 role c
+  role=$(state_get "$s" ROLE executor)
+  role_wants_prompt "$role" "$(state_get "$s" PARENT)" || return 0
+  c=$(session_team "$s" 2>/dev/null) || c=''
+  PRAMA_WT_BRANCH=$(state_get "$s" WORKTREE) PRAMA_TEAM_BASE=${c:+$(state_get "$c" BASE)} \
+    PRAMA_TEAM_ISOLATE=$(state_get "${c:-$s}" ISOLATE 0) build_role_system_prompt "$role" "$s" "$(state_get "$s" ZONE)"
 }
 
 # Paragraphs that depend on the team: isolation (worktrees) and closing. Read the locals above.
@@ -425,8 +442,14 @@ _runner_branch() { git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || printf
 
 _runner_title() { tmx select-pane -t "=$1:" -T "$2" 2>/dev/null || true; }
 
+# The session's state goes with its runner, but only while this runner still owns the pane: a
+# runner replaced in the same pane (respawn) must not wipe the state of the one that follows.
 _runner_cleanup() {
-  [ -n "${_RUNNER_SESSION:-}" ] && state_remove "$_RUNNER_SESSION"
+  [ -n "${_RUNNER_SESSION:-}" ] || return 0
+  local pp
+  pp=$(tmx display-message -p -t "=$_RUNNER_SESSION:" '#{pane_pid}' 2>/dev/null) || pp=''
+  [ -z "$pp" ] || [ "$pp" = "$$" ] || [ "$pp" = "$PPID" ] || return 0
+  state_remove "$_RUNNER_SESSION"
 }
 
 # Shows an error inside the pane and waits for a key so the message is not lost when the pane closes.
@@ -481,6 +504,14 @@ _runner_daemon_loop() {
       state_set "$session" RESTART_REQ=
       compose_session_cmd "$session"
       set -- "${CMD[@]}"
+      # The new spec, not only its flags: permissions, provider profile and runtime env too.
+      local dprof perr
+      perm=$(state_get "$session" PERM "$perm") dprof=$(state_get "$session" PROFILE default)
+      perm_allowed "$perm" || { perm=ask; state_set "$session" PERM=ask; }
+      if perr=$( (apply_provider_profile "$dprof") 2>&1 ); then apply_provider_profile "$dprof"
+      else printf ' %s✖ %s%s\n' "$C_ERR" "$(_t 'Profile %s: %s' "$dprof" "$(strip_ansi "${perr//$'\n'/ }")")" "$C_OFF"; fi
+      _runner_sandbox "$perm"
+      _runner_env "$session" "$agent" "$perm" daemon "$zone"
       printf '\n %s%s%s %s\n' "$C_NEON" "$(_t '↻ Reconfigured')" "$C_OFF" "${AGENT_MODEL:+$(_t 'model %s' "$AGENT_MODEL")}"
     fi
     task='' src=''
@@ -540,11 +571,7 @@ _runner_env() {
   PRESET=$(state_get "$s" PRESET) AGENT_MODEL=$(state_get "$s" MODEL)
   [ -n "$PRESET" ] && preset_load "$PRESET" >/dev/null 2>&1
   # Same rule as launch_agent: executors of a team keep their prompt (and branch) on a restart.
-  local parent; parent=$(state_get "$s" PARENT)
-  if [ "$role" != executor ] || { [ -n "$parent" ] && [ "$(session_role "$parent")" = coordinator ]; }; then
-    local c; c=$(session_team "$s" 2>/dev/null) || c=''
-    rp=$(PRAMA_WT_BRANCH=$(state_get "$s" WORKTREE) PRAMA_TEAM_BASE=${c:+$(state_get "$c" BASE)}          PRAMA_TEAM_ISOLATE=$(state_get "$s" ISOLATE 0) build_role_system_prompt "$role" "$s" "$zone")
-  fi
+  rp=$(session_role_prompt "$s")
   agent_runtime_env "$agent" "$s" "$perm" "$rp"
 }
 

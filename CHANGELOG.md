@@ -6,6 +6,67 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.8.1] - 2026-11-03
+
+A review of v6.8.0 found these, each reproduced on an isolated tmux server; every fix has a
+regression test.
+
+### Fixed
+- **`Alt+a` did nothing on Enter**: `display-popup` does not expand `#{client_name}`, so the picker
+  switched a client that does not exist. The key now goes through `run-shell`, like the `☰` button.
+- **The cockpit was rebuilt on every use** (`Alt+c`, the picker's cockpit row, the menu), kicking
+  whoever was watching: its layout signature was stored with a session target that tmux 3.4 refuses.
+  When the team changes, the new layout is built beside the old one and its viewers are moved over.
+- **Per-launch variables leaked into the tmux server**: a server started by `swarm` kept
+  `PRAMA_TEAM`, `PRAMA_TEAM_ISOLATE` and `PRAMA_TEAM_BASE` in its global environment, so later agents of
+  other teams were recorded in the wrong team and told they were isolated. The generated tmux.conf
+  unsets them, and an agent a coordinator launches takes its team from that coordinator.
+- **agy never got its role prompt** (bus, team, branch, plan): it has no system-prompt flag. A new agy
+  conversation now gets it as its first message (`--prompt-interactive`).
+- **`prama-agent restart` and Telegram's restart button** reran the pane's original command: changes
+  made with `fleet edit` were lost, Claude refused the reused `--session-id`, and the killed runner
+  wiped the session's state. They now restart in place from the saved spec, like `fleet restart`.
+- A team executor restarted in place (`fleet model`, `fleet edit`) lost its role prompt.
+- A Claude agent restarted before its first message tried to resume a conversation that did not exist.
+- **The watchdog could type a queued task into a plain shell** (an agent dropped to `[s] shell`), which
+  ran it as a command; it now reads the pane's command like every other sender.
+- Control characters in a message were typed as keys (ESC ended the paste, `ESC [ Z` is Shift+Tab,
+  Claude's permission mode). Only text is typed.
+- `capture`/`logs N` and state detection read N lines **plus the whole screen**: stale text kept agents
+  WORKING or STANDBY, and a block reported by hooks lost to a "Working…" line still on screen.
+- An expired limit block never cleared while its error text was still on screen (the queue stalled).
+- **Guard rails** were skipped by the top-level commands: an agent could `stop --all`, stop, restart or
+  type into a coordinator, or launch a coordinator directly. They now follow `fleet`'s rules.
+- **Teams leaked into each other** (invariant 14): a coordinator's report went to another team's
+  coordinator, alerts about a coordinator reached every coordinator of the zone, and `bus assign <role>`
+  fell back to other teams.
+- `worktree merge --test` could leave the merge in the base when the tests wrote to a merged file,
+  while saying it was undone. It now resets to the exact commit from before and checks it.
+- Queued messages lost their sender, and one starting with `[` was delivered as is (it could pose as
+  `[TASK FROM operator]`). Queued text now carries its real sender; a failed delivery keeps its turn.
+- `worktree status/merge/clean` ignored workers closed with `fleet kill`, and `worktree clean` never
+  removed anything. Cleaning now checks the worktree's own commits too (a renamed or deleted branch, a
+  detached HEAD) and reports a worktree git could not remove.
+- An agent could write another team's memory (invariant 17); `bus assign --task` to an agent outside
+  any team exited 1 silently; `plan verify` checked the base checkout when the owner of a task in an
+  isolated team was gone.
+- A coordinator of an isolated team that added an executor with `fleet spawn` got one editing the base
+  checkout: it now gets its own worktree.
+- The permission ceiling missed agy's `--mode` and opencode's `--auto` in pass-through arguments; a
+  launch could reuse the pass-through flags of a dead session with the same name; agents could take
+  names reserved for prama's own sessions; branches whose names slugify alike shared a worktree folder;
+  a linked `node_modules` counted as uncommitted work.
+- A session without a zone emptied every listing; `--internal-hook` exited 1 when prama could not
+  start; `cockpit --team` without a value looped forever; the cockpit of an agent outside any team
+  mixed every team of the zone; the watchdog could press Enter on a paste of the operator's;
+  `worktree merge --pr` reused a closed pull request; `git log` read a branch named like a file as a
+  path; a daemon reconfigured in place kept its old permissions and provider.
+- tmux.conf is regenerated when the navigation keys, the compact width or prama's path change.
+
+### Added
+- `CLAUDE.md`: how to work on prama-agent (commands, the live-checkout warning, conventions and the
+  tmux pitfalls behind these fixes).
+
 ## [6.8.0] - 2026-11-02
 
 ### Added

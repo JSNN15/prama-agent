@@ -81,7 +81,7 @@ _fleet_restart_in_place() {
 
 _fleet_json_row() {
   local s=$1 st info reason='' detail='' model
-  st=$(detect_session_state "$s")
+  st=$(bus_session_state "$s")
   if [ "$st" = BLOCKED ]; then info=$(session_block_info "$s"); reason=${info%%|*} detail=${info#*|}; fi
   model=$(health_get "$s" MODEL "$(state_get "$s" MODEL)")
   local team='' tc
@@ -128,7 +128,7 @@ _fleet_status() {
   while IFS='|' read -r s depth _; do
     (( n++ ))
     ind=''; (( depth )) && ind='└ '
-    st=$(detect_session_state "$s")
+    st=$(bus_session_state "$s")
     model=$(health_get "$s" MODEL "$(state_get "$s" MODEL)")
     box_row "$C_BORDER_HI" "$ind$(state_badge "$st")  ${C_BOLD}$s${C_OFF}  ${C_MUTED}$(state_get "$s" AGENT) · $(session_role "$s") · ${model:-$l_def}${C_OFF}$( [ -n "$(state_get "$s" PRESET)" ] && printf ' · preset %s' "$(state_get "$s" PRESET)")"
     q=$(quota_label "$s")
@@ -196,12 +196,27 @@ _fleet_spawn() {
   (( live < ${PRAMA_FLEET_MAX:-8} )) || die "$(_t "Fleet limit reached (%s/%s). Close agents with 'prama-agent fleet kill'." "$live" "${PRAMA_FLEET_MAX:-8}")"
   [ -n "$name" ] && { valid_session_name "$name" || die "$(_t "Invalid name: '%s'" "$name")"; tmx_has "$name" && die "$(_t "Session '%s' already exists." "$name")"; }
 
+  # An executor that joins an isolated team gets its own worktree, like the ones swarm launched:
+  # without one it would edit the base checkout the coordinator integrates into.
+  if [ -z "$wt" ] && [ "$role" = executor ] && [ -n "${PRAMA_SESSION:-}" ]; then
+    local tc; tc=$(session_team "$PRAMA_SESSION") || tc=''
+    if [ -n "$tc" ] && team_isolated "$tc"; then
+      if [ -z "$name" ]; then
+        local n=2 b; b=$(session_name_for "$agent" "$zone" executor ""); name=$b
+        while tmx_has "$name" || [ -f "$(state_file "$name")" ]; do name="$b-$n"; (( n++ )); done
+      fi
+      wt=$(worker_branch "$(team_name "$tc")" "$name")
+      info_msg "$(_t 'Isolated team: %s works on its own branch %s.' "$name" "$wt")" >&2
+    fi
+  fi
   PASS=(${pass[@]+"${pass[@]}"}) ONESHOT=0 PARALLEL=1 DAEMON_TASK='' DAEMON_INTERVAL=60
   local out
   out=$(launch_agent "$agent" "$zone" "$role" "$perm" "$remote" "$profile" "$wt" porcelain "$name") || exit 1
   out=${out##*$'\n'}
   if [ -n "$task" ]; then
-    queue_push "$out" "$task"
+    # With its sender, like any message an agent receives (a daemon gets the bare task as its prompt).
+    if [ "$role" = daemon ]; then queue_push "$out" "$task"
+    else queue_push "$out" "$(_t '[TASK FROM %s]: %s' "$(_fleet_caller)" "${task//$'\n'/ }")"; fi
     bus_event queued "$(_fleet_caller)" "$out" "$task"
   fi
   if (( json )); then

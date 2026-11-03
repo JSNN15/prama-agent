@@ -45,17 +45,47 @@ worker_branch() {
   printf 'prama/%s/%s' "$team" "$(slugify "$short")"
 }
 
-# _wt_members <coordinator> → WT_S WT_B WT_D (sessions with a worktree, their branch and directory)
+# _wt_members <coordinator> → WT_S WT_B WT_D (sessions with a worktree, their branch and directory).
+# Workers already closed (fleet kill) keep their worktree and branch: git lists them, under the
+# team's branch prefix (prama/<team>/), with the branch as their name.
 _wt_members() {
-  local c=$1 s b
+  local c=$1 s b line d='' dir
   WT_S=() WT_B=() WT_D=()
+  local -A have=()
   while IFS= read -r s; do
     [ "$(state_get "$s" PARENT)" = "$c" ] || continue
     b=$(state_get "$s" WORKTREE)
     [ -n "$b" ] || continue
-    WT_S+=("$s") WT_B+=("$b") WT_D+=("$(state_get "$s" TARGET_DIR)")
+    WT_S+=("$s") WT_B+=("$b") WT_D+=("$(state_get "$s" TARGET_DIR)"); have[$b]=1
   done < <(prama_sessions)
+  dir=$(zone_dir "$(state_get "$c" ZONE)" 2>/dev/null) || return 0
+  local prefix
+  prefix="refs/heads/prama/$(team_name "$c")/"
+  while IFS= read -r line; do
+    case $line in
+      'worktree '*) d=${line#worktree } ;;
+      "branch $prefix"*)
+        b=${line#branch refs/heads/}
+        [ -n "${have[$b]:-}" ] && continue
+        WT_S+=("$b") WT_B+=("$b") WT_D+=("$d"); have[$b]=1 ;;
+    esac
+  done < <(git -C "$dir" worktree list --porcelain 2>/dev/null)
   return 0
+}
+
+# _wt_dirty <dir> → number of uncommitted files, without the links PRAMA_WORKTREE_LINK put there
+# (a symlinked node_modules is not work).
+_wt_dirty() {
+  local f n=0 line skip
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    skip=0
+    for f in ${PRAMA_WORKTREE_LINK:-}; do
+      [ "$line" = "?? $f" ] && [ -L "$1/$f" ] && skip=1
+    done
+    (( skip )) || n=$(( n + 1 ))
+  done < <(git -C "$1" status --porcelain 2>/dev/null)
+  printf '%d' "$n"
 }
 
 # _wt_resolve_coord [<zone>|<coordinator>|<worker>] [--team T] → WT_COORD (an agent: its own team)
@@ -111,8 +141,9 @@ wt_status() {
   for i in "${!WT_S[@]}"; do
     ab=$(git -C "$dir" rev-list --left-right --count "$base...${WT_B[i]}" 2>/dev/null) || ab='0 0'
     behind=${ab%%[[:space:]]*} ahead=${ab##*[[:space:]]}
-    dirty=$(git -C "${WT_D[i]}" status --porcelain 2>/dev/null | grep -c . || true)
-    last=$(git -C "$dir" log -1 --format='%h %s (%cr)' "${WT_B[i]}" 2>/dev/null)
+    dirty=$(_wt_dirty "${WT_D[i]}")
+    # "--": a branch named like a file of the repository (guia) is still the branch.
+    last=$(git -C "$dir" log -1 --format='%h %s (%cr)' "${WT_B[i]}" -- 2>/dev/null)
     if (( json )); then
       (( first )) || printf ','
       first=0
@@ -136,8 +167,19 @@ wt_status() {
 
 # _wt_worker <session> → WT_W (session) WT_WB (branch) WT_WD (dir) WT_COORD
 _wt_worker() {
-  local s=${1:-}
+  local s=${1:-} c i
   [ -n "$s" ] || s=${PRAMA_SESSION:-}
+  # A closed worker is named by its branch (prama/<team>/<name>, as worktree status lists it).
+  if [[ "$s" == prama/*/* ]]; then
+    while IFS= read -r c; do
+      [ "$(state_get "$c" ZONE)" ] || continue
+      _wt_members "$c"
+      for i in "${!WT_B[@]}"; do
+        [ "${WT_B[i]}" = "$s" ] && { WT_W=$s WT_WB=$s WT_WD=${WT_D[i]} WT_COORD=$c; return 0; }
+      done
+    done < <(prama_sessions | while IFS= read -r c; do [ "$(session_role "$c")" = coordinator ] && printf '%s\n' "$c"; done)
+    die "$(_t "No live team has a worktree on branch '%s'." "$s")"
+  fi
   [ -n "$s" ] && valid_session_name "$s" && [ -f "$(state_file "$s")" ] || die "$(_t "Unknown session: '%s'" "$s")"
   WT_W=$s WT_WB=$(state_get "$s" WORKTREE) WT_WD=$(state_get "$s" TARGET_DIR)
   [ -n "$WT_WB" ] || die "$(_t "'%s' has no worktree (shared folder)." "$s")"
@@ -171,13 +213,14 @@ wt_merge() {
   [ "$cur" = "$base" ] || die "$(_t "The zone's checkout is on '%s', not on the team's base '%s': switch it first (git -C %s switch %s)." "$cur" "$base" "$dir" "$base")"
   [ -z "$(git -C "$dir" status --porcelain --untracked-files=no)" ] \
     || die "$(_t 'The checkout of %s has uncommitted changes: commit or stash them before merging.' "$dir")"
-  local dirty
-  dirty=$(git -C "$WT_WD" status --porcelain 2>/dev/null | grep -c . || true)
+  local dirty pre
+  dirty=$(_wt_dirty "$WT_WD")
   (( dirty > 0 )) && warn "$(_t '%s has %d uncommitted file(s); only its commits are merged.' "$WT_W" "$dirty")"
   if [ -z "$(git -C "$dir" rev-list "$base..$WT_WB" 2>/dev/null)" ]; then
     info_msg "$(_t 'Nothing to merge: %s has no commits that %s lacks.' "$WT_WB" "$base")"; return 0
   fi
   _wt_ident "$dir"
+  pre=$(git -C "$dir" rev-parse HEAD) || die "$(_t 'Could not read the current commit of %s.' "$dir")"
   if out=$(git -C "$dir" "${WT_ID[@]}" merge --no-ff --no-edit -m "Merge $WT_WB (prama: $WT_W)" "$WT_WB" 2>&1); then
     # Tests between merges: a merge that breaks them is undone, so the base stays green.
     if [ -n "$test" ]; then
@@ -185,9 +228,13 @@ wt_merge() {
       local tlog rc=0
       tlog=$( cd "$dir" && timeout "${PRAMA_MERGE_TEST_TIMEOUT:-1800}" bash -c "$test" 2>&1 ) || rc=$?
       if (( rc )); then
-        git -C "$dir" reset --merge ORIG_HEAD >/dev/null 2>&1
+        # Back to the commit from before the merge. The checkout was clean, so a hard reset only
+        # drops the merge and what the tests wrote to tracked files; it is checked, not assumed.
+        git -C "$dir" reset -q --hard "$pre" >/dev/null 2>&1
         bus_event conflict "${PRAMA_SESSION:-operator}" "$WT_W" "tests failed after merging $WT_WB (rc=$rc)"
         printf '%s\n' "$tlog" | tail -n 25 >&2
+        [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$pre" ] \
+          || die "$(_t 'The tests failed after merging %s and the merge could NOT be undone: %s is not at %s any more. Fix it by hand: git -C %s reset --hard %s' "$WT_WB" "$base" "${pre:0:12}" "$dir" "${pre:0:12}")"
         die "$(_t 'The tests failed after merging %s (code %d): the merge was undone, %s is unchanged. Send the failure to %s.' "$WT_WB" "$rc" "$base" "$WT_W")"
       fi
       ok "$(_t 'Tests passed.')"
@@ -216,11 +263,12 @@ _wt_merge_pr() {
   if [ -z "$(git -C "$WT_WD" rev-list "$base..$WT_WB" 2>/dev/null)" ]; then
     info_msg "$(_t 'Nothing to merge: %s has no commits that %s lacks.' "$WT_WB" "$base")"; return 0
   fi
-  dirty=$(git -C "$WT_WD" status --porcelain 2>/dev/null | grep -c . || true)
+  dirty=$(_wt_dirty "$WT_WD")
   (( dirty > 0 )) && warn "$(_t '%s has %d uncommitted file(s); only its commits are merged.' "$WT_W" "$dirty")"
   out=$(git -C "$WT_WD" push -u "$remote" "$WT_WB" 2>&1) \
     || die "$(_t 'Could not push %s to %s: %s' "$WT_WB" "$remote" "${out:0:300}")"
-  if url=$(cd "$WT_WD" && gh pr view "$WT_WB" --json url --jq .url 2>/dev/null) && [ -n "$url" ]; then
+  # Only an OPEN pull request is reused (gh pr view <branch> also finds closed and merged ones).
+  if url=$(cd "$WT_WD" && gh pr list --head "$WT_WB" --state open --json url --jq '.[0].url // empty' 2>/dev/null) && [ -n "$url" ]; then
     ok "$(_t 'Pull request already open, now updated: %s' "$url")"
   else
     title="$WT_WB (prama: $WT_W)"
@@ -285,7 +333,7 @@ wt_clean_team() {
   dir=$(zone_dir "$(state_get "$c" ZONE)") base=$(team_base "$c")
   _wt_members "$c"
   for i in "${!WT_S[@]}"; do
-    (( live )) || ! tmx_has "${WT_S[i]}" || continue
+    (( live )) || ! { valid_session_name "${WT_S[i]}" && tmx_has "${WT_S[i]}"; } || continue
     _wt_clean_one "$dir" "$base" "${WT_B[i]}" "${WT_D[i]}" && removed=$(( removed + 1 )) || kept=$(( kept + 1 ))
   done
   (( removed )) && ok "$(_t '%d merged worktree(s) removed.' "$removed")"
@@ -294,14 +342,27 @@ wt_clean_team() {
 
 # _wt_clean_one <repo> <base> <branch> <dir> → 0 removed, 1 kept (with a message)
 _wt_clean_one() {
-  local dir=$1 base=$2 b=$3 d=$4
-  if [ -d "$d" ] && [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]; then
+  local dir=$1 base=$2 b=$3 d=$4 head
+  if [ -d "$d" ] && (( $(_wt_dirty "$d") > 0 )); then
     warn "$(_t 'Kept %s: uncommitted changes in %s.' "$b" "$d")"; return 1
   fi
-  if [ -n "$(git -C "$dir" rev-list "$base..$b" 2>/dev/null)" ]; then
-    warn "$(_t 'Kept %s: it has commits not merged into %s (prama-agent worktree merge, or delete it by hand).' "$b" "$base")"; return 1
+  # What is merged is decided on what exists: the recorded branch (it may have been renamed or
+  # deleted) and the worktree's own HEAD (it may be detached, or on another branch).
+  if git -C "$dir" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1; then
+    if [ -n "$(git -C "$dir" rev-list "$base..refs/heads/$b" -- 2>/dev/null)" ]; then
+      warn "$(_t 'Kept %s: it has commits not merged into %s (prama-agent worktree merge, or delete it by hand).' "$b" "$base")"; return 1
+    fi
+  elif [ ! -d "$d" ]; then
+    return 1   # neither the branch nor the worktree: nothing to clean
   fi
-  [ -d "$d" ] && git -C "$dir" worktree remove "$d" >/dev/null 2>&1
+  if [ -d "$d" ]; then
+    head=$(git -C "$d" rev-parse -q --verify HEAD 2>/dev/null) || head=''
+    if [ -z "$head" ] || [ -n "$(git -C "$dir" rev-list "$base..$head" -- 2>/dev/null)" ]; then
+      warn "$(_t 'Kept %s: its worktree %s holds commits not merged into %s.' "$b" "$d" "$base")"; return 1
+    fi
+    git -C "$dir" worktree remove "$d" >/dev/null 2>&1 \
+      || { warn "$(_t 'Kept %s: git could not remove the worktree %s.' "$b" "$d")"; return 1; }
+  fi
   git -C "$dir" branch -d "$b" >/dev/null 2>&1 || true
   return 0
 }

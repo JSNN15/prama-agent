@@ -118,6 +118,10 @@ _bus_find_role() {
       elif [ -n "$steam" ] && [ "$(session_team "$s" 2>/dev/null)" = "$steam" ]; then rank=2
       elif [ -n "$szone" ] && [ "$(state_get "$s" ZONE)" = "$szone" ]; then rank=1
       fi
+      # Teams do not leak (invariant 14): a team member only reaches its own team; an agent outside
+      # any team only its own zone, and never a session that belongs to a team.
+      if [ -n "$steam" ]; then (( rank >= 2 )) || continue
+      else (( rank >= 1 )) && ! session_team "$s" >/dev/null 2>&1 || continue; fi
     fi
     ts=$(state_get "$s" STARTED_AT)
     if (( rank > best_rank )) || { (( rank == best_rank )) && [[ "$ts" > "$best_ts" ]]; }; then
@@ -375,11 +379,17 @@ _bus_assign() {
     return 0
   fi
 
+  # Queued text carries its real sender, as a live delivery does: the watchdog types it verbatim,
+  # so a message cannot pose as one from someone else.
+  local qmsg
+  _tv qmsg '[TASK FROM %s]: %s' "$sender" "${msg//$'\n'/ }"
   if ! resolve_bus_target "$target"; then
     if ! valid_session_name "$target" || is_internal_session "$target"; then
       die "$(_t "Invalid target: '%s' (use an exact session name or a role: %s)" "$target" "${BUS_ROLES[*]}")"
     fi
-    queue_push "$target" "$msg"
+    is_in "$target" "${BUS_ROLES[@]}" \
+      && die "$(_t "No live '%s' you can reach (your team, or your zone outside teams)." "$target")"
+    queue_push "$target" "$qmsg"
     bus_event queued "$sender" "$target" "$msg"
     warn "$(_t "No live session named '%s' (nor with that role). Task saved in its queue." "$target")"
     return 0
@@ -398,13 +408,12 @@ _bus_assign() {
     return 0
   fi
 
-  if bus_can_inject "$dest"; then
-    tmx_send "$dest" "$(_t '[TASK FROM %s]: %s' "$sender" "${msg//$'\n'/ }")" || die "$(_t "Could not write to '%s'." "$dest")"
+  if bus_can_inject "$dest" && tmx_send "$dest" "$qmsg"; then
     bus_event assign "$sender" "$dest" "$msg"
     ok "$(_t "Task delivered live to '%s'." "$dest")"
     _bus_notify "📨 [BUS] $sender → $dest: $msg"
   else
-    queue_push "$dest" "$msg"
+    queue_push "$dest" "$qmsg"
     bus_event queued "$sender" "$dest" "$msg"
     warn "$(_t "'%s' is not ready to receive text (%s); task saved in its queue." "$dest" "$(bus_session_state "$dest")")"
   fi
@@ -421,16 +430,22 @@ _bus_report() {
   [ -n "$msg" ] || die "$(_t 'Usage: prama-agent bus report "<result summary>"')"
   local sender coord=''
   sender=$(_bus_sender)
-  # The sender's own coordinator (its team); without a team, the closest coordinator.
-  if [ "$sender" != operator ] && coord=$(session_team "$sender") && [ "$coord" != "$sender" ]; then :
+  # The sender's own coordinator (its team). A coordinator reports to the operator (log and
+  # Telegram), never to another team's coordinator; an agent outside any team, to its zone's
+  # coordinator when the zone has exactly one team (invariant 14).
+  if [ "$sender" != operator ] && coord=$(session_team "$sender"); then
+    [ "$coord" = "$sender" ] && coord=''
   else
     coord=''
-    resolve_bus_target coordinator && [ "$BUS_TARGET_KIND" = role ] && coord=$BUS_TARGET
+    if [ "$sender" != operator ]; then
+      local -a zc=()
+      mapfile -t zc < <(zone_teams "$(state_get "$sender" ZONE)")
+      (( ${#zc[@]} == 1 )) && coord=${zc[0]}
+    fi
   fi
-  bus_event report "$sender" "${coord:-coordinator}" "$msg"
+  bus_event report "$sender" "${coord:-operator}" "$msg"
   if [ -n "$coord" ] && [ "$coord" != "$sender" ]; then
-    if bus_can_inject "$coord"; then
-      tmx_send "$coord" "$(_t '[REPORT FROM %s]: %s' "$sender" "${msg//$'\n'/ }")" || true
+    if bus_can_inject "$coord" && tmx_send "$coord" "$(_t '[REPORT FROM %s]: %s' "$sender" "${msg//$'\n'/ }")"; then
       ok "$(_t 'Report logged and delivered to the coordinator (%s).' "$coord")"
     else
       queue_push "$coord" "$(_t '[REPORT FROM %s]: %s' "$sender" "$msg")"
@@ -458,12 +473,13 @@ _bus_broadcast() {
     st=$(bus_session_state "$s")
     case "$st" in
       READY|WORKING)
-        if tmx_send "$s" "$line"; then (( sent++ )); else skipped+=("$s:ERROR"); fi ;;
+        if tmx_send "$s" "$line"; then (( sent++ )); else queue_push "$s" "$line"; (( queued++ )); fi ;;
+      BLOCKED) queue_push "$s" "$line"; (( queued++ )) ;;   # delivered when it recovers
       *) skipped+=("$s:$st") ;;
     esac
   done < <(prama_sessions)
   bus_event broadcast "$sender" '*' "$msg"
-  ok "$(_t 'Broadcast: %d delivered live, %d queued to daemons.' "$sent" "$queued")"
+  ok "$(_t 'Broadcast: %d delivered live, %d queued.' "$sent" "$queued")"
   (( ${#skipped[@]} )) && info_msg "$(_t 'Skipped (not ready to receive text): %s' "${skipped[*]}")"
   return 0
 }

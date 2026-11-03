@@ -318,7 +318,12 @@ plan_verify() {
   i=$PI owner=${P_owner[i]} accept=${P_accept[i]}
   _plan_can_edit "$owner" || die "$(_t 'Only the coordinator or the task owner can change %s.' "$id")"
   [ -n "$accept" ] || die "$(_t '%s has no acceptance check: prama-agent plan set %s accept="<command>".' "$id" "$id")"
-  [ -n "$owner" ] && [ -n "$(state_get "$owner" WORKTREE)" ] && dir=$(state_get "$owner" TARGET_DIR)
+  if [ -n "$owner" ] && [ -n "$(state_get "$owner" WORKTREE)" ]; then dir=$(state_get "$owner" TARGET_DIR)
+  elif [ -n "$owner" ] && [ "$owner" != "$PL_COORD" ] && [ ! -f "$(state_file "$owner")" ] && team_isolated "$PL_COORD" 2>/dev/null; then
+    # The owner is gone and its worktree is unknown: checking the base checkout instead would
+    # record a pass (or a failure) for work that is not there.
+    die "$(_t "%s's owner (%s) is no longer running and its worktree is unknown: merge its branch first, then verify on the base." "$id" "$owner")"
+  fi
   [ -n "$dir" ] && [ -d "$dir" ] || dir=$(zone_dir "$PL_ZONE")
   [ -d "$dir" ] || die "$(_t 'Directory not found: %s' "$dir")"
   sha=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || true)
@@ -491,12 +496,14 @@ subcmd_plan() {
 plan_bus_hook() {
   local kind=$1 task=$2 who=$3 text=${4:-} c
   [ -n "$task" ] || return 0
+  # _plan_target dies for an agent outside any team: probe it in a subshell first, so a bus
+  # message to such an agent is still delivered (die would end the whole command).
+  ( _plan_target "$who" '' ) >/dev/null 2>&1 || return 0
+  _plan_target "$who" '' 2>/dev/null || return 0
   if [ "$kind" = assign ]; then
-    _plan_target "$who" '' 2>/dev/null || return 0
     [ "$who" = "$PL_COORD" ] && who=''
     ( _plan_tx _plan_m_status "$task" doing "$who" ) || return 1
   else
-    _plan_target "$who" '' 2>/dev/null || return 0
     ( _plan_tx _plan_m_status "$task" review '' "$text" ) || return 1
   fi
 }

@@ -34,4 +34,6 @@ I18N+=(
   ['The '\''%s'\'' profile is not allowed on this host (PRAMA_PROFILES=%s).']='El perfil '\''%s'\'' no está permitido en este servidor (PRAMA_PROFILES=%s).'
   ['An agent cannot launch another with more permissions than its own (%s → %s).']='Un agente no puede lanzar a otro con más permisos que los suyos (%s → %s).'
   ['An agent cannot pass '\''%s'\'' to the agent it launches.']='Un agente no puede pasarle '\''%s'\'' al agente que lanza.'
+  ['These are your standing instructions for this session (prama sends them as your first message). Reply only "OK" and wait for tasks.']='Estas son tus instrucciones permanentes para esta sesión (prama las envía como tu primer mensaje). Responde solo "OK" y espera tareas.'
+  [''\''%s'\'' is a name prama reserves for its own sessions.']=''\''%s'\'' es un nombre que prama reserva para sus propias sesiones.'
 )

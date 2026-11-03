@@ -24,4 +24,6 @@ I18N+=(
   ['Clear the memory of %s (%s notes)? [y/N]']='¿Borrar la memoria de %s (%s notas)? [s/N]'
   ['Cancelled.']='Cancelado.'
   ['Memory of %s cleared']='Memoria de %s borrada'
+  ['An agent writes only to its own zone'\''s memory (%s).']='Un agente solo escribe en la memoria de su propia zona (%s).'
+  ['An agent writes only to its own team'\''s memory (%s) or, with --zone-wide, its zone'\''s.']='Un agente solo escribe en la memoria de su propio equipo (%s) o, con --zone-wide, en la de su zona.'
 )

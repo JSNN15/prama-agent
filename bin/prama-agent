@@ -5,7 +5,7 @@
 
 set -u
 
-VERSION="6.8.0"
+VERSION="6.8.1"
 
 # Status line fast path: agy redraws it several times per second, so the last line is reused
 # for PRAMA_SL_MIN seconds with bash builtins only (no forks, before anything else runs).
@@ -57,7 +57,8 @@ if [ "${1:-}" = "--internal-hook" ]; then
   [ "${2:-}" = agy ] && printf '{}\n'
   # shellcheck source=/dev/null
   # PRAMA_HOOK_DEBUG=<file> collects errors while diagnosing a CLI's hook integration.
-  { source "$LIB_DIR/core.sh" && source "$LIB_DIR/health.sh" && prama_init && hook_ingest "${2:-}" "${3:-}"; } \
+  # A subshell: prama_init can die (bad config), and that must not change the hook's exit code.
+  ( source "$LIB_DIR/core.sh" && source "$LIB_DIR/health.sh" && prama_init && hook_ingest "${2:-}" "${3:-}" ) \
     >/dev/null 2>>"${PRAMA_HOOK_DEBUG:-/dev/null}"
   exit 0
 fi
@@ -65,7 +66,7 @@ fi
 # Status line (cache miss): parse the payload, update the quota file, print the line.
 if [ "${1:-}" = "--internal-statusline" ]; then
   # shellcheck source=/dev/null
-  { source "$LIB_DIR/core.sh" && source "$LIB_DIR/health.sh" && prama_init >/dev/null && statusline_ingest "${2:-}"; } \
+  ( source "$LIB_DIR/core.sh" && source "$LIB_DIR/health.sh" && prama_init >/dev/null && statusline_ingest "${2:-}" ) \
     2>>"${PRAMA_HOOK_DEBUG:-/dev/null}"
   exit 0
 fi
@@ -409,6 +410,11 @@ subcmd_stop() {
   local target=${1:-} yes=0
   [ "${2:-}" = "-y" ] || [ "${2:-}" = "--yes" ] && yes=1
   [ -n "$target" ] || die "$(_t 'Usage: prama-agent stop <session> | stop --all [-y]')"
+  # An agent has the guard rails of 'fleet kill' (never itself, a coordinator or another team).
+  if [ -n "${PRAMA_SESSION:-}" ]; then
+    [ "$target" = "--all" ] && die "$(_t "Only the operator can stop every agent; an agent closes its own with 'prama-agent fleet kill <session>'.")"
+    _fleet_kill "$target"; return $?
+  fi
   if [ "$target" = "--all" ]; then
     mapfile -t _ss < <(prama_sessions)
     (( ${#_ss[@]} )) || { info_msg "$(_t 'No active agent sessions.')"; return 0; }
@@ -431,9 +437,10 @@ subcmd_stop() {
   ok "$(_t "Session '%s' closed." "$target")"
 }
 
+# Same as 'fleet restart': the supervisor relaunches the agent from its saved spec (edits kept, same
+# conversation). respawn-pane would rerun the pane's original command line instead.
 subcmd_restart() {
-  require_session "${1:-}"
-  tmx respawn-pane -k -t "=$1:" && ok "$(_t "Agent relaunched in '%s' (history is kept)." "$1")"
+  _fleet_restart "${1:-}"
 }
 
 subcmd_logs() {
@@ -463,6 +470,8 @@ subcmd_send() {
   local text="$*"
   [ -n "$target" ] && [ -n "$text" ] || die "$(_t 'Usage: prama-agent send <session> "<text>"')"
   require_session "$target"
+  # Agents type into other agents only within their guard rails (the bus is their channel).
+  [ -n "${PRAMA_SESSION:-}" ] && _fleet_authorize "$target" send
   tmx_send "$target" "$text" && ok "$(_t "Sent to '%s'." "$target")"
 }
 

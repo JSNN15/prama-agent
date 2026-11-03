@@ -2679,7 +2679,7 @@ launch_fzf_cockpit() {
   if (( ${#names[@]} == 0 )); then warn "$(_t 'No sessions to inspect')"; return 1; fi
   for s in "${names[@]}"; do
     role=$(session_role "$s")
-    st=$(detect_session_state "$s")
+    st=$(bus_session_state "$s")
     printf -v line '%-34s %-12s %s' "$s" "$role" "$st"
     lines+=("$line")
   done
