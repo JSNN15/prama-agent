@@ -355,7 +355,7 @@ mkdir -p "$HOME/.claude/projects/t" && : > "$HOME/.claude/projects/t/$sid.jsonl"
 out=$(PRAMA_SESSION=tp-co "$BIN" fleet model tp-ex1 opus 2>&1)
 assert_contains "Coordinator changes an executor's model" "opus" "$out"
 wait_for 8 "$P capture-pane -p -t '=tp-ex1:' -S -80 | grep -q -- '\[--model\] \[opus\]'"
-out=$($P capture-pane -p -t '=tp-ex1:' -S -80)
+out=$($P capture-pane -p -J -t '=tp-ex1:' -S -80)   # -J: a long line of arguments must not split a token
 assert_contains "Agent relaunched with the new model" "[--model] [opus]" "$out"
 assert_contains "…resuming the same conversation" "[--resume]" "$out"
 assert_contains "…in the same pane (scrollback kept)" "[--model] [sonnet]" "$out"
