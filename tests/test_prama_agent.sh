@@ -1009,7 +1009,7 @@ assert_eq "The status bar calls the operator to it" "tp-guia" "$($P show-options
 assert_true "…and it is on the bus" "jq -e 'select(.event==\"assistant\" and .to==\"tp-guia\")' '$STATE/bus/events.jsonl' >/dev/null"
 cl=$($P list-clients -t '=tp-aco' -F '#{client_name}' | head -n 1)
 # (display-message -p takes no -c on tmux 3.2: the format is rendered for the session)
-assert_contains "★ <name> shows in the operator's status bar" "★ tp-guia" "$($P display-message -p -t '=tp-aco:' "$($P show-options -gqv status-left)")"
+assert_contains "★ <name> shows in the operator's status bar, without the prefix" "★ guia" "$($P display-message -p -t '=tp-aco:' "$($P show-options -gqv status-left)")"
 printf '#!/usr/bin/env bash\ncat > "%s/rows"; exit 1\n' "$TMP_ROOT" > "$TMP_ROOT/bin/fzf"; chmod +x "$TMP_ROOT/bin/fzf"
 "$BIN" --internal-nav pick "$cl" >/dev/null 2>&1
 rm -f "$TMP_ROOT/bin/fzf"
@@ -1222,6 +1222,131 @@ wait_for 5 "$P capture-pane -p -t '=tp-dk:' | grep -q MOCK_AGENT"
 bash -c "$LIBS"'; PRAMA_SEND_DELAY=0.4 tmx_send tp-dk "uno-uno" & PRAMA_SEND_DELAY=0.4 tmx_send tp-dk "dos-dos" & wait'
 wait_for 5 "[ \$($P capture-pane -p -t '=tp-dk:' -S -40 | grep -c '^GOT: ') -ge 2 ]"
 assert_eq "Two senders at once never merge their messages" "dos-dos uno-uno" "$($P capture-pane -p -t '=tp-dk:' -S -40 | sed -n 's/^GOT: //p' | sed 's/ *$//' | sort | xargs)"
+"$BIN" stop --all -y >/dev/null 2>&1
+
+section "Attention: what only the operator can move"
+attn() { $P show-options -gqv "@prama_attention${1:-}" 2>/dev/null; }
+attn_on() { $P list-clients -F '#{client_session}' 2>/dev/null | head -n 1; }
+open_dialog() { # a session showing a real permission dialog
+  mock_ctl "$1" interactive; mock_ctl "$1" screen "$(cat "$FX/claude-permission-dialog.txt")"
+  "$BIN" claude alpha --bg --name "$1" >/dev/null
+  wait_for 5 "$P capture-pane -p -t '=$1:' | grep -q 'Tab to amend'"
+}
+mock_ctl tp-aa interactive; "$BIN" claude alpha --bg --name tp-aa >/dev/null
+open_dialog tp-ab
+mock_ctl tp-ac interactive; mock_ctl tp-ac screen 'Invalid API key · Please run /login'; "$BIN" claude alpha --bg --name tp-ac >/dev/null
+mock_ctl tp-ad interactive; mock_ctl tp-ad screen 'RESOURCE_EXHAUSTED: individual quota reached'; "$BIN" claude alpha --bg --name tp-ad >/dev/null
+"$BIN" claude alpha --bg --name tp-ae >/dev/null
+wait_for 10 "$P capture-pane -p -t '=tp-ae:' | grep -q PRAMA_STANDBY"
+wait_for 5 "$P capture-pane -p -t '=tp-ad:' | grep -q RESOURCE_EXHAUSTED"
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "A dialog, a block a person must clear, a stopped agent and a usage limit nobody can act on need you, most urgent first; a ready agent does not" \
+  "tp-ab tp-ac tp-ad tp-ae" "$(attn _list)"
+"$BIN" stop tp-ad -y >/dev/null 2>&1
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "…counted for the status bar" "3" "$(attn)"
+tmux -L "$USER_SOCKET" new-session -d -s attc -x 140 -y 40 "env -u TMUX TERM=xterm-256color tmux -u -L $PRAMA_TMUX_SOCKET attach-session -t =tp-aa"
+wait_for 5 "[ \"\$(attn_on)\" = tp-aa ]"
+cl=$($P list-clients -F '#{client_name}' | head -n 1)
+attn_bar() { tmux -L "$USER_SOCKET" capture-pane -p -t =attc: | tail -n 1; }
+assert_true "The status bar says how many, and the first one's short name" "wait_for 7 'attn_bar | grep -q \"▲ 3 ab \"'"
+if tmux_33; then
+  tmux -L "$USER_SOCKET" resize-window -t =attc: -x 60 -y 40
+  assert_true "…on a phone, just the count" "wait_for 7 'attn_bar | grep -q \"▲3 \"'"
+  tmux -L "$USER_SOCKET" resize-window -t =attc: -x 140 -y 40
+fi
+mock_ctl tp-aas interactive; "$BIN" claude alpha --bg --role assistant --name tp-aas --brief "ayuda" >/dev/null
+assert_contains "The key is bound to what needs you" "--internal-nav attention '#{client_name}'" "$(grep -F 'bind -n M-o' "$STATE/tmux.conf")"
+tmux -L "$USER_SOCKET" send-keys -t =attc: M-o
+assert_true "Alt+o goes to the most urgent one" "wait_for 5 '[ \"\$(attn_on)\" = tp-ab ]'"
+"$BIN" --internal-nav attention "$cl" tp-ab >/dev/null 2>&1
+assert_eq "…each press moves to the next" "tp-ac" "$(attn_on)"
+"$BIN" --internal-nav click "$cl" tp-ac attention >/dev/null 2>&1
+assert_eq "…the ▲ button does the same" "tp-ae" "$(attn_on)"
+"$BIN" --internal-nav attention "$cl" tp-ae >/dev/null 2>&1
+assert_eq "…the assistant that called comes after what is stuck" "tp-aas" "$(attn_on)"
+assert_eq "…and stops calling once reached" "" "$($P show-options -gqv @prama_assist 2>/dev/null)"
+"$BIN" --internal-nav attention "$cl" tp-aas >/dev/null 2>&1
+assert_eq "…then it starts over" "tp-ab" "$(attn_on)"
+"$BIN" cockpit alpha --no-attach >/dev/null 2>&1
+$P switch-client -c "$cl" -t '=tp-cockpit-alpha'
+was=$($P display-message -p -t '=tp-cockpit-alpha:' '#{@prama_view}')
+"$BIN" --internal-nav attention "$cl" tp-cockpit-alpha >/dev/null 2>&1
+now=$($P display-message -p -t '=tp-cockpit-alpha:' '#{@prama_view}')
+assert_eq "Inside a cockpit you keep the team view" "tp-cockpit-alpha" "$(attn_on)"
+assert_true "…and the focus moves to the agent that needs you" "[ '$now' != '$was' ] && [[ ' $(attn _list) ' == *' $now '* ]]"
+$P switch-client -c "$cl" -t '=tp-aa'
+mock_ctl tp-acx interactive; "$BIN" claude alpha --bg --role coordinator --name tp-acx >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-acx:' | grep -q MOCK_AGENT"
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "A stopped agent is its coordinator's to handle while that coordinator runs" "tp-ab tp-ac" "$(attn _list)"
+"$BIN" stop tp-acx -y >/dev/null 2>&1
+"$BIN" stop tp-ac -y >/dev/null 2>&1; "$BIN" stop tp-ae -y >/dev/null 2>&1; "$BIN" stop tp-aas -y >/dev/null 2>&1
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "What gets solved leaves the count" "1" "$(attn)"
+$P switch-client -c "$cl" -t '=tp-ab'
+"$BIN" --internal-nav attention "$cl" tp-ab >/dev/null 2>&1
+assert_eq "Alone on the only one, the key stays put" "tp-ab" "$(attn_on)"
+$P switch-client -c "$cl" -t '=tp-aa'
+"$BIN" stop tp-ab -y >/dev/null 2>&1
+"$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "With nothing left the count goes away" "" "$(attn)$(attn _list)"
+assert_true "…from the status bar too" "wait_for 7 '! attn_bar | grep -q ▲'"
+"$BIN" --internal-nav attention "$cl" tp-aa >/dev/null 2>&1
+assert_eq "…and the key has nowhere to take you" "tp-aa" "$(attn_on)"
+tmux -L "$USER_SOCKET" kill-session -t =attc 2>/dev/null
+"$BIN" stop --all -y >/dev/null 2>&1
+mock_ctl tp-lc interactive; "$BIN" claude alpha --bg --role coordinator --name tp-lc >/dev/null
+mock_ctl tp-lx interactive; mock_ctl tp-lx screen 'RESOURCE_EXHAUSTED: individual quota reached'
+PRAMA_PARENT=tp-lc "$BIN" claude alpha --bg --name tp-lx >/dev/null 2>&1
+wait_for 5 "$P capture-pane -p -t '=tp-lc:' | grep -q MOCK_AGENT"
+wait_for 5 "$P capture-pane -p -t '=tp-lx:' | grep -q RESOURCE_EXHAUSTED"
+"$BIN" fleet watchdog tick >/dev/null 2>&1; "$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "A usage limit does not count while a coordinator that can act was told" "" "$(attn _list)"
+printf 'HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n' "$(date +%s)" > "$STATE/bus/state/tp-lc.health"
+"$BIN" fleet watchdog tick >/dev/null 2>&1; "$BIN" fleet watchdog tick >/dev/null 2>&1
+assert_eq "…and counts, with its coordinator, when the same limit stops that coordinator" "tp-lc tp-lx" "$(attn _list)"
+"$BIN" stop --all -y >/dev/null 2>&1
+
+# The bell: a real client whose terminal output is recorded.
+export TMP_ROOT BIN FX P
+export -f mock_ctl wait_for open_dialog
+export RINGF="$TMP_ROOT/ring.log"
+mock_ctl tp-ra interactive; "$BIN" claude alpha --bg --name tp-ra >/dev/null
+open_dialog tp-rb
+tmux -L "$USER_SOCKET" new-session -d -s ringc -x 140 -y 40 "env -u TMUX TERM=xterm-256color script -qfc 'tmux -u -L $PRAMA_TMUX_SOCKET attach-session -t =tp-ra' '$RINGF'"
+wait_for 5 "[ \"\$(attn_on)\" = tp-ra ]"
+cl=$($P list-clients -F '#{client_name}' | head -n 1)
+out=$(CL=$cl PRAMA_TERMINAL_NOTIFY_GAP=9999 bash -c "$LIBS"'
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=()
+  rings() { LC_ALL=C grep -aoF $'"'"'\a\033]9;'"'"' "$RINGF" | wc -l | tr -d " "; }
+  said() { LC_ALL=C grep -ao $'"'"'\033]9;[^\033]*'"'"' "$RINGF" | tail -n 1 | cut -d";" -f2-; }
+  tick() { watchdog_tick >/dev/null 2>&1; sleep 0.2; echo "$1=$(rings)"; }
+  tick seed
+  open_dialog tp-rc; tick new; echo "text=$(said)"
+  tick same
+  open_dialog tp-rd; tick gap
+  PRAMA_TERMINAL_NOTIFY_GAP=0
+  open_dialog tp-re; $P switch-client -c "$CL" -t "=tp-re"; tick viewing
+  $P switch-client -c "$CL" -t "=tp-ra"
+  open_dialog tp-rf; open_dialog tp-rg; tick two; echo "text2=$(said)"
+  PRAMA_TERMINAL_NOTIFY=0; open_dialog tp-rh; tick off; unset PRAMA_TERMINAL_NOTIFY
+  terminal_notify "$(printf "limpio\033]0;titulo\a")" >/dev/null; sleep 0.2; echo "clean=$(said)"
+' 2>&1)
+assert_contains "A watchdog that starts rings for nothing: what was already waiting only shows in the bar" "seed=0" "$out"
+assert_contains "A new dialog rings the operator's terminal" "new=1" "$out"
+assert_contains "…naming the agent" "text=▲ tp-rc te necesita" "$out"
+assert_contains "…once" "same=1" "$out"
+assert_contains "…at most one ring every PRAMA_TERMINAL_NOTIFY_GAP seconds" "gap=1" "$out"
+assert_contains "A terminal already on that agent is not rung" "viewing=1" "$out"
+assert_contains "Two at once ring together" "two=2" "$out"
+assert_contains "…and say how many" "text2=▲ 2 agentes te necesitan" "$out"
+assert_contains "PRAMA_TERMINAL_NOTIFY=0 turns it off" "off=2" "$out"
+assert_contains "Control characters never reach the terminal (only the visible text does)" "clean=limpio]0;titulo" "$out"
+n=$(LC_ALL=C grep -aoF $'\a\033]9;' "$RINGF" | wc -l)
+mock_ctl tp-rs interactive; "$BIN" claude alpha --bg --role assistant --name tp-rs --brief "ayuda" >/dev/null
+assert_true "An assistant calling rings too" "wait_for 5 '[ \$(LC_ALL=C grep -aoF \$'\"'\"'\a\033]9;'\"'\"' \"\$RINGF\" | wc -l) -gt $n ]'"
+tmux -L "$USER_SOCKET" kill-session -t =ringc 2>/dev/null
 "$BIN" stop --all -y >/dev/null 2>&1
 
 section "UI engine"

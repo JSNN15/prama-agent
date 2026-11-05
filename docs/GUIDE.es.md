@@ -82,12 +82,33 @@ Dentro del tmux de prama, desde cualquier agente o desde el cockpit:
 | `Alt+m` | `◂ MENU` | volver al menú (los agentes siguen trabajando) |
 | `Alt+a` | `☰ AGENTES` | lista de agentes (equipos, estado, modelo, cuota): ir a cualquiera o a un cockpit |
 | `Alt+c` | `▦ COCKPIT` | cockpit del equipo ⇄ el agente con el foco |
-| `Alt+o` | `★ <nombre>` | el [asistente](#asistentes-agentes-que-trabajan-para-ti) que te espera |
+| `Alt+o` | `▲ 2 <nombre>` / `★ <nombre>` | [lo que te necesita](#lo-que-te-necesita), el siguiente con cada pulsación; si no hay nada pendiente, tu [asistente](#asistentes-agentes-que-trabajan-para-ti) más reciente |
 | `Ctrl+b n` / `Ctrl+b p` | `▶` / `◀` (celular) | agente siguiente / anterior; dentro del cockpit, el panel siguiente / anterior |
 | `Ctrl+b z` | | agrandar el panel con el foco en el cockpit |
 
-Las teclas se configuran con `PRAMA_MENU_KEY`, `PRAMA_NAV_KEY` y `PRAMA_COCKPIT_KEY`; los botones
-funcionan con toques en Termius, Blink o cualquier terminal con soporte de mouse.
+Las teclas se configuran con `PRAMA_MENU_KEY`, `PRAMA_NAV_KEY`, `PRAMA_COCKPIT_KEY` y `PRAMA_ASSIST_KEY`;
+los botones funcionan con toques en Termius, Blink o cualquier terminal con soporte de mouse.
+
+### Lo que te necesita
+
+La barra de estado muestra `▲ 2 <primero>` (`▲2` en el celular) cuando hay agentes que no pueden avanzar
+sin ti:
+
+- un diálogo esperando tu respuesta;
+- un bloqueo que debe resolver una persona (login, crédito, una carpeta que aprobar, un modelo);
+- un agente detenido del que nadie más se ocupa: uno sin coordinador en marcha, o un asistente.
+
+Un límite de uso cuenta solo si ningún coordinador en marcha puede actuar (no hay, o también está detenido):
+si no, se resuelve solo y al coordinador ya se le avisa.
+
+`Alt+o`, o un toque en `▲`, te lleva ahí: primero lo más urgente, el siguiente con cada pulsación, y
+después el asistente que te llamó. Dentro de un cockpit mueve el foco y conservas la vista del equipo.
+
+Cada caso nuevo también suena en las terminales que tienes conectadas, con una campana y una notificación
+OSC 9, salvo en la que ya está en ese agente. Suena como máximo una vez cada `PRAMA_TERMINAL_NOTIFY_GAP`
+segundos (30), y `PRAMA_TERMINAL_NOTIFY=0` lo apaga. Que se oiga o aparezca una notificación depende de tu
+terminal. El menú de prama no está conectado a tmux, así que no suena; su lista muestra el estado de cada
+agente.
 
 ### Equipos aislados: una rama por agente
 
@@ -322,7 +343,8 @@ prama-agent fleet hooks status               # hooks de salud de cada CLI
 - **Los diálogos son tuyos.** Una sesión que muestra un permiso o una pregunta queda en `WAITING`: no se
   escribe nada en ella, porque en Claude Code Enter sobre un diálogo de permiso significa *Sí*. Sus mensajes
   esperan en la cola, un agente nunca puede responderlo, `prama-agent send` se niega salvo que agregues
-  `--force`, y si sigue abierto `PRAMA_WAIT_ALERT` segundos (120) se te avisa una vez.
+  `--force`. Aparece de inmediato en [lo que te necesita](#lo-que-te-necesita), y si sigue abierto
+  `PRAMA_WAIT_ALERT` segundos (120) también recibes un mensaje.
 - **Los reinicios conservan la configuración.** `prama-agent restart`, `fleet restart` y el botón de
   reinicio de Telegram relanzan el agente en el mismo panel desde su configuración guardada (incluido lo
   que cambiaste con `fleet edit`) y retoman su conversación; una conversación de Claude que nunca
@@ -534,7 +556,8 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_SEND_DELAY` | `0.3` | pausa entre pegar un mensaje en un agente y presionar Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | cuánto tiempo `fleet agents` muestra bloqueada una cuenta tras un 429 (s) |
 | `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` / `PRAMA_ASSIST_KEY` | `M-m` / `M-a` / `M-c` / `M-o` | teclas de navegación en tmux |
-| `PRAMA_WAIT_ALERT` | `120` | segundos que un diálogo sigue abierto antes de avisarte |
+| `PRAMA_WAIT_ALERT` | `120` | segundos que un diálogo sigue abierto antes de enviarte un mensaje |
+| `PRAMA_TERMINAL_NOTIFY` / `PRAMA_TERMINAL_NOTIFY_GAP` | `1` / `30` | hacer sonar tus terminales cuando algo empieza a necesitarte / como máximo una vez cada tantos segundos |
 | `PRAMA_HUMAN_HOLD` / `PRAMA_ASSIST_HOLD` | `20` / `180` | segundos que esperan los mensajes del bus después de que escribes en un agente / un asistente |
 | `PRAMA_ASSIST_OPEN` / `PRAMA_ASSIST_IDLE` | `notify` / `60` | `switch`: lleva a un operador inactivo (segundos sin teclear) al asistente nuevo |
 | `PRAMA_ASSIST_PRIVATE` | `1` | `0` deja que otros agentes lean la pantalla de un asistente |

@@ -60,4 +60,6 @@ I18N+=(
   ['--focus requires a session']='--focus requiere una sesión'
   ['★ %s is ready for you (from %s) · %s opens it']='★ %s te espera (de %s) · %s lo abre'
   ['No assistant is waiting for you.']='Ningún asistente te espera.'
+  ['Nothing needs you right now.']='Ahora mismo nada te necesita.'
+  ['Nothing else needs you.']='Nada más te necesita.'
 )

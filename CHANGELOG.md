@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.13.0] - 2026-11-06
+
+### Added
+- **What needs you, in the status bar.** `▲ 2 <first>` (`▲2` on a phone) counts the agents that cannot move
+  without the operator: a dialog, a block a person has to clear, a stopped agent no running coordinator
+  handles (an assistant always counts). A usage limit counts only when no running coordinator can act on it,
+  because otherwise it clears by itself and the coordinator is told.
+- **`Alt+o` (`PRAMA_ASSIST_KEY`) now goes to what needs you**, the most urgent first and the next one on each
+  press, then the assistant that called; with nothing pending, the newest assistant, as before. Tapping `▲`
+  does the same. Inside a cockpit it moves the focus and keeps the team view.
+- **A ring on the operator's terminals** when something starts needing them: a bell and an OSC 9 notification,
+  except on a terminal already on that agent. At most one every `PRAMA_TERMINAL_NOTIFY_GAP` seconds (30);
+  `PRAMA_TERMINAL_NOTIFY=0` turns it off. A terminal that stopped reading costs the watchdog 2 seconds and
+  cannot hang it. An assistant calling rings too.
+
+### Fixed
+- `★` showed the first 14 characters of the name, so an auto-named assistant read `prama-backend-`: it now
+  drops the prefix, like the status bar's session name.
+
 ## [6.12.0] - 2026-11-04
 
 ### Security

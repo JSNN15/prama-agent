@@ -80,12 +80,32 @@ prama's tmux, from any agent or from the cockpit:
 | `Alt+m` | `◂ MENU` | back to the menu (agents keep running) |
 | `Alt+a` | `☰ AGENTS` | agent list (teams, state, model, quota): jump to any agent or cockpit |
 | `Alt+c` | `▦ COCKPIT` | team cockpit ⇄ the agent in focus |
-| `Alt+o` | `★ <name>` | the [assistant](#assistants-agents-that-work-for-you) waiting for you |
+| `Alt+o` | `▲ 2 <name>` / `★ <name>` | [what needs you](#what-needs-you), the next one on each press; with nothing pending, your newest [assistant](#assistants-agents-that-work-for-you) |
 | `Ctrl+b n` / `Ctrl+b p` | `▶` / `◀` (phone) | next / previous agent; inside the cockpit, the next / previous pane |
 | `Ctrl+b z` | | zoom the focused cockpit pane |
 
-Keys are configurable (`PRAMA_MENU_KEY`, `PRAMA_NAV_KEY`, `PRAMA_COCKPIT_KEY`); the buttons work by
-touch in Termius, Blink or any terminal with mouse support.
+Keys are configurable (`PRAMA_MENU_KEY`, `PRAMA_NAV_KEY`, `PRAMA_COCKPIT_KEY`, `PRAMA_ASSIST_KEY`); the
+buttons work by touch in Termius, Blink or any terminal with mouse support.
+
+### What needs you
+
+The status bar shows `▲ 2 <first>` (`▲2` on a phone) when agents cannot move without you:
+
+- a dialog waiting for your answer;
+- a block a person has to clear (login, credit, a folder to trust, a model);
+- a stopped agent nobody else handles: one with no coordinator running, or an assistant.
+
+A usage limit counts only when no running coordinator can act on it (none, or one stopped too): otherwise
+it clears by itself and the coordinator is told.
+
+`Alt+o`, or a tap on `▲`, takes you there: the most urgent first, the next one on each press, and the
+assistant that called after those. Inside a cockpit it moves the focus and you keep the team view.
+
+A new one also rings the terminals you have attached, with a bell and an OSC 9 notification, unless that
+terminal is already on the agent. There is at most one ring every `PRAMA_TERMINAL_NOTIFY_GAP` seconds
+(30), and `PRAMA_TERMINAL_NOTIFY=0` turns it off. Whether it makes a sound or shows a notification
+depends on your terminal. prama's menu is not attached to tmux, so it does not ring; its list shows each
+agent's state.
 
 ### Isolated teams: a branch per agent
 
@@ -313,8 +333,9 @@ prama-agent fleet hooks status               # health hooks per agent CLI
   only. Every action is logged on the bus.
 - **Dialogs are yours.** A session showing a permission or a question is `WAITING`: nothing is typed into
   it, because in Claude Code Enter on a permission dialog means *Yes*. Its messages wait in the queue, an
-  agent can never answer it, `prama-agent send` refuses unless you add `--force`, and if it stays open
-  `PRAMA_WAIT_ALERT` seconds (120) you are told once.
+  agent can never answer it, `prama-agent send` refuses unless you add `--force`. It shows at once under
+  [what needs you](#what-needs-you), and if it stays open `PRAMA_WAIT_ALERT` seconds (120) you are also
+  told with a message.
 - **Restarts keep the configuration.** `prama-agent restart`, `fleet restart` and Telegram's restart
   button relaunch the agent in the same pane from its saved spec (model, preset, permissions changed
   with `fleet edit` included) and resume its conversation; a Claude conversation that never got a
@@ -517,7 +538,8 @@ the menu, the tmux status bar of every agent and the fzf inspector. Both are als
 | `PRAMA_SEND_DELAY` | `0.3` | pause between pasting a message into an agent and pressing Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | how long `fleet agents` reports an account blocked by a 429 (s) |
 | `PRAMA_MENU_KEY` / `PRAMA_NAV_KEY` / `PRAMA_COCKPIT_KEY` / `PRAMA_ASSIST_KEY` | `M-m` / `M-a` / `M-c` / `M-o` | navigation keys inside tmux |
-| `PRAMA_WAIT_ALERT` | `120` | seconds a dialog stays open before you are told |
+| `PRAMA_WAIT_ALERT` | `120` | seconds a dialog stays open before you get a message |
+| `PRAMA_TERMINAL_NOTIFY` / `PRAMA_TERMINAL_NOTIFY_GAP` | `1` / `30` | ring your terminals when something starts needing you / at most once every so many seconds |
 | `PRAMA_HUMAN_HOLD` / `PRAMA_ASSIST_HOLD` | `20` / `180` | seconds bus messages wait after you type in an agent / an assistant |
 | `PRAMA_ASSIST_OPEN` / `PRAMA_ASSIST_IDLE` | `notify` / `60` | `switch`: take an idle operator (seconds without typing) to a new assistant |
 | `PRAMA_ASSIST_PRIVATE` | `1` | `0` lets other agents read an assistant's screen |

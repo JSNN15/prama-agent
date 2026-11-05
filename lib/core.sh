@@ -23,7 +23,7 @@ PRAMA_TMUX_SOCKET="${PRAMA_TMUX_SOCKET:-prama}"         # dedicated tmux server 
 PRAMA_MENU_KEY="${PRAMA_MENU_KEY:-M-m}"                 # key that detaches back to the menu
 PRAMA_NAV_KEY="${PRAMA_NAV_KEY:-M-a}"                   # agent picker popup
 PRAMA_COCKPIT_KEY="${PRAMA_COCKPIT_KEY:-M-c}"           # team cockpit ⇄ agent
-PRAMA_ASSIST_KEY="${PRAMA_ASSIST_KEY:-M-o}"             # jump to the assistant waiting for you
+PRAMA_ASSIST_KEY="${PRAMA_ASSIST_KEY:-M-o}"             # jump to what needs you, next on each press
 PRAMA_COMPACT_COLS="${PRAMA_COMPACT_COLS:-100}"         # narrower clients (phones) get the compact layout
 # Language and theme from the environment win over config.env (PRAMA_LANG=en prama-agent help).
 PRAMA_LANG_ENV=${PRAMA_LANG:-} PRAMA_THEME_ENV=${PRAMA_THEME:-}
@@ -393,6 +393,23 @@ profile_allowed() {
   [ "$p" = default ] || [ -z "${PRAMA_PROFILES:-}" ] || [[ " $PRAMA_PROFILES " == *" $p "* ]]
 }
 
+# terminal_notify <text> [session] — a bell and an OSC 9 notification (terminals that do not know it
+# ignore it) on the terminals the operator has attached, except one already on <session>. Written to
+# the terminal itself, which tmux has no command for, so a terminal that stopped reading must not
+# hang the caller, and only fixed text and session names may come here (invariant 24).
+# Returns 0 when at least one terminal was told.
+terminal_notify() {
+  (( ${PRAMA_TERMINAL_NOTIFY:-1} )) || return 1
+  local text=${1//[[:cntrl:]]/} skip=${2:-} tty term sess rc=1
+  while IFS='|' read -r tty term sess; do
+    [[ "$term" == tmux* ]] && continue   # the cockpit's viewers
+    [ -n "$skip" ] && [ "$sess" = "$skip" ] && continue
+    [[ "$tty" == /dev/pts/* || "$tty" == /dev/tty* ]] && [ -c "$tty" ] && [ -w "$tty" ] || continue
+    printf '\a\033]9;%s\033\\' "$text" | timeout 2 tee -- "$tty" >/dev/null 2>&1 && rc=0
+  done < <(tmx list-clients -F '#{client_tty}|#{client_termname}|#{client_session}' 2>/dev/null)
+  return $rc
+}
+
 is_internal_session() {
   [[ "$1" == "${PRAMA_SESSION_PREFIX}-telegram-bot" || "$1" == "${PRAMA_SESSION_PREFIX}-watchdog" \
      || "$1" == "${PRAMA_SESSION_PREFIX}-cockpit-"* ]]
@@ -510,7 +527,7 @@ tmux_at_least() {
 }
 
 # Writes the managed tmux config for the prama server (never ~/.tmux.conf) and reloads it.
-TMUX_CONF_VERSION="prama-agent-managed-v6.12.0"
+TMUX_CONF_VERSION="prama-agent-managed-v6.13.0"
 ensure_tmux_conf() {
   local force=${1:-0}
   # The theme and the language are part of the generated file: changing either regenerates it.
@@ -522,6 +539,7 @@ ensure_tmux_conf() {
     local tmp="$PRAMA_TMUX_CONF.tmp.$$" nav
     local A=${TH_ACCENT:-#38bdf8} H=${TH_HEAD:-#0f172a} T=${TH_TEXT:-#e2e8f0} B=${TH_BADGE:-#1e293b}
     local BD=${TH_BORDER:-#334155} M=${TH_MUTED:-#64748b} OK=${TH_OK:-#34d399} SEL=${TH_SEL:-#1e3a5f} SF=${TH_SELFG:-#f0f9ff}
+    local WARN=${TH_WARN:-#fbbf24}
     local l_agents l_nav
     _tv l_agents 'AGENTS'; _tv l_nav '%s agents · %s cockpit' "$PRAMA_NAV_KEY" "$PRAMA_COCKPIT_KEY"
     # Key bindings call back into prama with this server's socket and state (tmux does not
@@ -546,14 +564,19 @@ ensure_tmux_conf() {
     # Cockpit panes are nested clients (TERM tmux*): they get a bare status line, the buttons
     # belong to the outer client only.
     status_left="#{?#{m:tmux*,#{client_termname}},,$left_btns}"
-    # An assistant waiting for the operator: "★ <name>", a tap (or the key) jumps to it.
-    local assist_btn
+    # What only the operator can move, published by the watchdog: "▲ 2 <first>" ("▲2" on a phone).
+    # An assistant waiting for them: "★ <name>". A tap or the key jumps to it.
+    local assist_btn attn_btn short
+    short="#{s/^${PRAMA_SESSION_PREFIX}-//:"
+    local attn_wide=" ▲ #{@prama_attention} #{=|14|…:${short}@prama_attention_top}} "
     if tmux_at_least 3 3; then
-      assist_btn="#[range=user|assist]#[bg=$OK#,fg=$H#,bold] ★ #{=14:@prama_assist} #[norange]#[default] "
+      attn_btn="#[range=user|attention]#[bg=$WARN#,fg=$H#,bold]#{?$narrow, ▲#{@prama_attention} ,$attn_wide}#[norange]#[default] "
+      assist_btn="#[range=user|assist]#[bg=$OK#,fg=$H#,bold] ★ #{=|14|…:${short}@prama_assist}} #[norange]#[default] "
     else
-      assist_btn="#[bg=$OK#,fg=$H#,bold] ★ #{=14:@prama_assist} #[default] "
+      attn_btn="#[bg=$WARN#,fg=$H#,bold]$attn_wide#[default] "
+      assist_btn="#[bg=$OK#,fg=$H#,bold] ★ #{=|14|…:${short}@prama_assist}} #[default] "
     fi
-    status_left+="#{?#{m:tmux*,#{client_termname}},,#{?#{@prama_assist},$assist_btn,}}"
+    status_left+="#{?#{m:tmux*,#{client_termname}},,#{?#{@prama_attention},$attn_btn,}#{?#{@prama_assist},$assist_btn,}}"
     # In a hook, #{client_name} can be another client (the cockpit's nested viewers): use the
     # client that fired it (#{hook_client}, tmux ≥ 3.3); fit re-checks its session and width.
     local fit_hooks=''
@@ -621,14 +644,14 @@ set-environment -gu CLAUDE_CODE_MESSAGING_SOCKET
 set-environment -gu CLAUDE_CODE_MESSAGING_TOKEN
 
 # Navigation (works inside agents and the cockpit; the agent keeps running):
-#   $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent picker · $PRAMA_COCKPIT_KEY team cockpit ⇄ agent · $PRAMA_ASSIST_KEY assistant waiting
+#   $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent picker · $PRAMA_COCKPIT_KEY team cockpit ⇄ agent · $PRAMA_ASSIST_KEY what needs you
 #   prefix n / p: next / previous agent · prefix z: zoom the focused cockpit pane
 bind -n $PRAMA_MENU_KEY detach-client
 bind m detach-client
 # (display-popup does not expand #{client_name} in its command: run-shell does, then opens the popup)
 bind -n $PRAMA_NAV_KEY run-shell -b "$nav click '#{client_name}' '#{session_name}' agents"
 bind -n $PRAMA_COCKPIT_KEY run-shell -b "$nav cockpit '#{client_name}' '#{session_name}'"
-bind -n $PRAMA_ASSIST_KEY run-shell -b "$nav assist '#{client_name}' '#{session_name}'"
+bind -n $PRAMA_ASSIST_KEY run-shell -b "$nav attention '#{client_name}' '#{session_name}'"
 bind n run-shell -b "$nav next '#{client_name}' '#{session_name}'"
 bind p run-shell -b "$nav prev '#{client_name}' '#{session_name}'"
 # Status bar buttons (tap in Termius or click): ◂ MENU · ☰ AGENTES · ▦ COCKPIT

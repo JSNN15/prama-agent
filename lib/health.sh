@@ -331,9 +331,11 @@ _watch_log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 
 # One pass over the fleet. Uses the global associative arrays W_PREV and W_READY.
 watchdog_tick() {
-  local s st info reason detail prev key msg
+  local s st info reason detail prev key msg rank
+  local -a attn=()
   declare -A seen=()
   declare -p W_WAIT >/dev/null 2>&1 || declare -gA W_WAIT=()
+  declare -p W_ATTN >/dev/null 2>&1 || declare -gA W_ATTN=()
   while IFS= read -r s; do
     seen[$s]=1
     # With the pane's command: a supervisor that dropped to a plain shell is SHELL, never READY
@@ -378,6 +380,7 @@ watchdog_tick() {
       W_PREV[$s]=$key
       W_READY[$s]=0
     fi
+    if rank=$(_attention_rank "$s" "$st" "$reason"); then attn+=("$rank $s $key"); fi
 
     # A dialog only a person can answer: told once, if it stays open (agents in ask mode hit many,
     # most are answered at once).
@@ -436,6 +439,7 @@ watchdog_tick() {
   for s in "${!W_PREV[@]}"; do
     [ -n "${seen[$s]:-}" ] || unset 'W_PREV[$s]' 'W_READY[$s]'
   done
+  _watch_attention ${attn[@]+"${attn[@]}"}
   _watch_closed
   # The assistant the status bar calls the operator to: gone, or already found by them.
   local wa
@@ -447,6 +451,68 @@ watchdog_tick() {
   fi
   _watch_quota_alerts
   _watch_plans
+}
+
+# _attention_rank <session> <state> <block reason> → 1 a dialog, 2 a block a person has to clear,
+# 3 stopped; fails when the session can move without the operator. A usage limit is left out while a
+# coordinator that can act was told (a count that never goes down stops being read); with none, or one
+# stopped by the same limit, nobody else will say the team is standing still. A stopped agent whose
+# coordinator is running is that coordinator's to relaunch or close; an assistant is always the
+# operator's.
+_attention_rank() {
+  local s=$1 st=$2 reason=${3:-} c
+  case "$st" in
+    WAITING) printf 1 ;;
+    BLOCKED)
+      if [ "$reason" = limit ] && [ "$(session_role "$s")" != assistant ]; then
+        c=$(_watch_coordinators "$s")
+        # W_PREV holds each session's state from this pass or the one before.
+        case ${c:+${W_PREV[$c]:-}} in READY*|WORKING*|WAITING*) tmx_has "$c" && return 1 ;; esac
+      fi
+      printf 2 ;;
+    DEAD|STANDBY)
+      if [ "$(session_role "$s")" != assistant ]; then
+        c=$(_watch_coordinators "$s")
+        if [ -n "$c" ] && tmx_has "$c"; then return 1; fi
+      fi
+      printf 3 ;;
+    *) return 1 ;;
+  esac
+}
+
+# _watch_attention ["rank session key"...] — the status bar's ▲ and the key's list, as tmux options
+# (written only when they change), and the bell on the operator's terminals. A session rings once when
+# it starts needing them, at most one ring every PRAMA_TERMINAL_NOTIFY_GAP seconds (agents in ask mode
+# open many dialogs). The watchdog's first pass only takes note: a restart rings for nothing.
+_watch_attention() {
+  local rank s key list='' msg skip='' n=0 now=${EPOCHSECONDS:-$(date +%s)}
+  local -a fresh=()
+  local -A live=()
+  while read -r rank s key; do
+    [ -n "$s" ] || continue
+    list+="${list:+ }$s"; (( n++ ))
+    [ "${W_ATTN[$s]:-}" = "$key" ] || fresh+=("$s")
+    live[$s]=$key
+  done < <( (( $# )) && printf '%s\n' "$@" | LC_ALL=C sort -k1,1 -k2,2 )
+  W_ATTN=()
+  for s in "${!live[@]}"; do W_ATTN[$s]=${live[$s]}; done
+  if [ "$list" != "${W_ATTN_LIST- }" ]; then
+    W_ATTN_LIST=$list
+    if (( n )); then
+      tmx set-option -g @prama_attention "$n" \; set-option -g @prama_attention_top "${list%% *}" \
+        \; set-option -g @prama_attention_list "$list" 2>/dev/null
+    else
+      tmx set-option -gu @prama_attention \; set-option -gu @prama_attention_top \
+        \; set-option -gu @prama_attention_list 2>/dev/null
+    fi
+  fi
+  if (( ! ${W_ATTN_SEEDED:-0} )); then W_ATTN_SEEDED=1; return 0; fi
+  (( ${#fresh[@]} )) || return 0
+  (( now - ${W_RING_AT:-0} >= ${PRAMA_TERMINAL_NOTIFY_GAP:-30} )) || return 0
+  if (( ${#fresh[@]} == 1 )); then skip=${fresh[0]}; _tv msg '▲ %s needs you' "$skip"
+  else _tv msg '▲ %s agents need you' "${#fresh[@]}"; fi
+  if terminal_notify "$msg" "$skip"; then W_RING_AT=$now; fi
+  return 0
 }
 
 # Keeps the copy `restore` uses up to date, whatever code the session's own supervisor is running
@@ -566,7 +632,7 @@ _watch_quota_alerts() {
 }
 
 watchdog_loop() {
-  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=()
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=()
   local interval=${PRAMA_WATCH_INTERVAL:-5} msg
   [[ "$interval" =~ ^[0-9]+$ ]] && (( interval > 0 )) || interval=5
   tmx select-pane -t "=$(watchdog_session):" -T "watchdog" 2>/dev/null || true
