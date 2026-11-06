@@ -1507,6 +1507,8 @@ out=$(QF="$STATE/bus/state/tp-qh.quota" HF="$STATE/bus/state/tp-qh.health" bash 
   watchdog_tick >/dev/null 2>&1
   printf "restart:%s:%s:%s\n" "$(bus_session_state tp-qh)" "$(state_get tp-qh LIMIT_UNTIL)" "$(queue_len tp-qh)"
   state_set tp-qh "LIMIT_UNTIL=$(( $(date +%s) - 5 ))"
+  printf "HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n" "$(( $(date +%s) - 10 ))" > "$HF"
+  printf "Q_TS=%s\nQ_5H=100\nQ_5H_RESET=%s\n" "$(date +%s)" "$(( $(date +%s) - 5 ))" > "$QF"
   declare -gA W_PREV=() W_READY=()
   watchdog_tick >/dev/null 2>&1
   printf "down:%s:%s\n" "$(state_get tp-qh LIMIT_UNTIL)" "$(queue_len tp-qh)"

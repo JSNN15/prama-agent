@@ -352,17 +352,14 @@ _watch_limit_until() {
   printf '%s' "$until"
 }
 
-# _watch_limit_over <session> <state> — the turn a limit stopped is not finished: at the reset it is told
-# to carry on, ahead of what is queued. Not if it got going some other way (a restart, a prompt): that
-# ends the hold too, whatever the time, with nothing to say.
+# _watch_limit_over <session> <state> — the turn a limit stopped is not finished: when the clock releases
+# it (the hooks still say blocked) it is told to carry on, ahead of what is queued. If it got going some
+# other way (a restart, a prompt that worked) the hooks already say so, and there is nothing to say.
 _watch_limit_over() {
-  local s=$1 st=$2 held prompted msg
-  held=$(state_get "$s" LIMIT_UNTIL)
-  [ -n "$held" ] || return 0
+  local s=$1 st=$2 msg
+  [ -n "$(state_get "$s" LIMIT_UNTIL)" ] || return 0
   state_set "$s" LIMIT_UNTIL=
-  [[ "$held" =~ ^[0-9]+$ ]] && [ "$st" = READY ] && (( held <= ${EPOCHSECONDS:-$(date +%s)} )) || return 0
-  prompted=$(health_get "$s" PROMPT_TS 0)
-  [[ "$prompted" =~ ^[0-9]+$ ]] && (( prompted >= held )) && return 0
+  [ "$st" = READY ] && [ "$(health_get "$s" HEALTH)" = blocked ] || return 0
   _tv msg '[PRAMA] Your usage limit has reset. Carry on with what you were doing.'
   queue_push_front "$s" "$msg"
 }
