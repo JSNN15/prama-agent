@@ -301,6 +301,7 @@ watchdog_revive() {
   watchdog_ensure
 }
 
+# shellcheck disable=SC2120  # `force` comes from lib/fleet.sh
 watchdog_ensure() {
   (( ${PRAMA_WATCHDOG:-1} )) || [ "${1:-}" = force ] || return 0
   rm -f "$PRAMA_BUS_DIR/watchdog.stopped" 2>/dev/null
