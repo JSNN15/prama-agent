@@ -1472,7 +1472,7 @@ out=$("$BIN" send tp-sb --force "touch $MARK" 2>&1); rc=$?
 assert_true "…the operator can" "[ $rc -eq 0 ]"
 n=$(wc -l < "$STATE/bus/events.jsonl")
 out=$(PRAMA_SESSION=tp-sc "$BIN" bus report --help 2>&1)
-assert_contains "bus report --help prints the usage" "bus report" "$out"
+assert_contains "bus report --help prints the usage" "prama-agent bus <" "$out"
 assert_eq "…and reports nothing" "$n" "$(wc -l < "$STATE/bus/events.jsonl")"
 "$BIN" stop --all -y >/dev/null 2>&1
 
