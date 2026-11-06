@@ -43,7 +43,8 @@ TOAST_MSG='' TOAST_KIND=info TOAST_UNTIL=0
 KEY='' MX=0 MY=0 MB=0 ZT=''
 MODAL_TOP=1 MODAL_LEFT=1 MODAL_W=0 MODAL_H=0 MODAL_HINT=''
 HUB_NS=0
-HUB_ACTIONS=(new swarm teams cockpit telegram doctor prefs)
+HUB_ACTIONS=(new swarm teams cockpit doctor prefs)
+telegram_enabled && HUB_ACTIONS=(new swarm teams cockpit telegram doctor prefs)
 declare -ga TUI_FRAME=() TUI_PREV=() TUI_ZONES=() TUI_KEYS=() TUI_KEYS_R=() HUB_ITEMS=()
 declare -ga S_NAME=() S_PID=() S_DEAD=() S_CMD=() S_ATT=() S_PATH=() S_STATE=() S_ROLE=()
 declare -ga S_CPU=() S_MEM=() S_ETIME=() S_COMM=() PV=() LP=() RP=()

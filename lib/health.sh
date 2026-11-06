@@ -186,6 +186,16 @@ def pick($quota; $f; $m; $w): [$quota | to_entries[]
   "Q_PLAN=\(.plan_tier // "" | gsub("[\n=]"; " "))"
 '
 
+# _kv_fresh <file> <now> KEY=VALUE… → 0 when the file already says all that, written less than 5 min ago.
+_kv_fresh() {
+  local f=$1 now=$2 line kv; shift 2
+  local -A have=()
+  [ -f "$f" ] || return 1
+  while IFS= read -r line; do have[${line%%=*}]=${line#*=}; done < "$f"
+  [[ "${have[Q_TS]:-}" =~ ^[0-9]+$ ]] && (( now - have[Q_TS] < 300 )) || return 1
+  for kv in "$@"; do [ "${have[${kv%%=*}]-}" = "${kv#*=}" ] || return 1; done
+}
+
 statusline_ingest() {
   local agent=$1 s=${PRAMA_SESSION:-} json now line kv=()
   json=$(head -c 262144)
@@ -193,7 +203,8 @@ statusline_ingest() {
   valid_session_name "$s" || return 0
   if command -v jq >/dev/null 2>&1; then
     mapfile -t kv < <(jq -r "$_SL_JQ" <<< "$json" 2>/dev/null)
-    if (( ${#kv[@]} )); then
+    # An idle agent's numbers do not change, and a write here makes the watchdog look at it again.
+    if (( ${#kv[@]} )) && ! _kv_fresh "$(quota_file "$s")" "$now" "${kv[@]}"; then
       _kv_merge "$(quota_file "$s")" "$s" "${kv[@]}" "Q_TS=$now"
       local a=() x
       for x in "${kv[@]}"; do [[ "$x" =~ ^Q_(5H|7D)=[0-9] ]] && a+=("$x"); done
@@ -365,18 +376,55 @@ _watch_limit_over() {
   queue_push_front "$s" "$msg"
 }
 
+# _watch_quiet <session> <its pane now> → 0 when nothing it can be judged by has changed since the last
+# pass: no output on its screen, no write to its state, hooks or quota, nothing queued. The state it had
+# then still stands, so an idle fleet costs one call to tmux per pass, however many agents it has.
+# Only READY and WORKING: what is stopped or blocked can change with the clock or with other sessions.
+# tmux keeps activity in seconds, so a pane active in the second of the last listing counts as changed.
+_watch_quiet() {
+  local s=$1 now=$2 was=${W_ACT[$1]:-} f q
+  W_ACT[$s]=$now
+  case ${W_PREV[$s]:-} in READY|WORKING) ;; *) return 1 ;; esac
+  [ "$now" = "$was" ] && (( ${now%%|*} < ${W_LISTED:-0} )) || return 1
+  _slug "$s"; f="$PRAMA_BUS_DIR/state/$_S"
+  # The mark has to be strictly newer: before bash 5, -nt compares whole seconds, and a write in the
+  # mark's own second must not go unseen.
+  [[ "$W_BEAT" -nt "$f.env" && "$W_BEAT" -nt "$f.health" && "$W_BEAT" -nt "$f.quota" ]] || return 1
+  for q in "$PRAMA_BUS_DIR/inbox/$_S/new/"*.task; do [ -e "$q" ] && return 1; done
+  return 0
+}
+
 # One pass over the fleet. Uses the global associative arrays W_PREV and W_READY.
 watchdog_tick() {
-  local s st info reason detail prev key msg rank
+  local s st info reason detail prev key msg rank act dead cmd assist wa='' names='' full=0 listed
   local -a attn=()
   declare -A seen=()
   declare -p W_WAIT >/dev/null 2>&1 || declare -gA W_WAIT=()
   declare -p W_ATTN >/dev/null 2>&1 || declare -gA W_ATTN=()
-  while IFS= read -r s; do
-    seen[$s]=1
+  declare -p W_ACT >/dev/null 2>&1 || declare -gA W_ACT=()
+  # Every PRAMA_WATCH_FULL passes (5 min) everyone is looked at, whatever they seem to be doing. A single
+  # pass from the command line always is, and must not touch the running watchdog's marks.
+  local every=${PRAMA_WATCH_FULL:-60}
+  [[ "$every" =~ ^[0-9]+$ ]] || every=60
+  W_PASS=$(( ${W_PASS:-0} + 1 ))
+  (( every <= 1 || W_PASS % every == 1 || ${W_ONE_SHOT:-0} )) && full=1
+  W_FULL=$full
+  # Files are compared with the mark the last pass left, so a write during that pass still counts.
+  W_BEAT="$PRAMA_BUS_DIR/watchdog.beat.$(( (W_PASS + 1) % 2 ))"
+  (( ${W_ONE_SHOT:-0} )) || : > "$PRAMA_BUS_DIR/watchdog.beat.$(( W_PASS % 2 ))"
+  listed=${EPOCHSECONDS:-$(date +%s)}
+  # The session's name goes last: a name made by hand, with a separator in it, does not move the rest.
+  while IFS='|' read -r act dead cmd assist s; do
+    [ -n "$assist" ] && wa=$assist
+    [ -n "$s" ] && ! is_internal_session "$s" || continue
+    seen[$s]=1 names+="$s "
+    if _watch_quiet "$s" "$act|$dead|$cmd" && (( ! full )); then
+      [ "${W_PREV[$s]}" = READY ] && W_READY[$s]=$(( ${W_READY[$s]:-0} + 1 ))
+      continue
+    fi
     # With the pane's command: a supervisor that dropped to a plain shell is SHELL, never READY
     # (a queued task typed there would run as a shell command).
-    st=$(bus_session_state "$s")
+    st=$(detect_session_state "$s" "${dead:-0}" "$cmd")
     info=''
     [ "$st" = BLOCKED ] && info=$(session_block_info "$s")
     reason=${info%%|*} detail=${info#*|}
@@ -427,7 +475,10 @@ watchdog_tick() {
     fi
     # The numbers can arrive after the block.
     [ "$key" != BLOCKED:limit ] || _watch_limit_until "$s" >/dev/null
-    if rank=$(_attention_rank "$s" "$st" "$reason"); then attn+=("$rank $s $key"); fi
+    case $st in
+      READY|WORKING) ;;
+      *) if rank=$(_attention_rank "$s" "$st" "$reason"); then attn+=("$rank $s $key"); fi ;;
+    esac
 
     # A dialog only a person can answer: told once, if it stays open (agents in ask mode hit many,
     # most are answered at once).
@@ -481,16 +532,18 @@ watchdog_tick() {
     fi
     _watch_quota_collect "$s"
     _watch_snapshot "$s"
-  done < <(prama_sessions)
+  done < <(tmx list-sessions -F '#{window_activity}|#{pane_dead}|#{pane_current_command}|#{@prama_assist}|#{session_name}' 2>/dev/null)
+  W_LISTED=$listed
 
   for s in "${!W_PREV[@]}"; do
-    [ -n "${seen[$s]:-}" ] || unset 'W_PREV[$s]' 'W_READY[$s]'
+    [ -n "${seen[$s]:-}" ] || unset 'W_PREV[$s]' 'W_READY[$s]' 'W_ACT[$s]'
   done
   _watch_attention ${attn[@]+"${attn[@]}"}
-  _watch_closed
+  # A session ending changes the list; the rest of the time there is little new on disk to read. Each minute
+  # anyway: one that came and went between two passes, or a call to tmux that failed.
+  if (( full || W_PASS % 12 == 0 )) || [ "$names" != "${W_NAMES- }" ]; then _watch_closed; fi
+  W_NAMES=$names
   # The assistant the status bar calls the operator to: gone, or already found by them.
-  local wa
-  wa=$(tmx show-options -gqv @prama_assist 2>/dev/null)
   if [ -n "$wa" ]; then
     if ! tmx_has "$wa" || session_human_active "$wa" 0; then
       tmx set-option -gu @prama_assist 2>/dev/null
@@ -532,6 +585,7 @@ _attention_rank() {
 # it starts needing them, at most one ring every PRAMA_TERMINAL_NOTIFY_GAP seconds (agents in ask mode
 # open many dialogs). The watchdog's first pass only takes note: a restart rings for nothing.
 _watch_attention() {
+  (( $# == 0 && ${W_ATTN_SEEDED:-0} )) && [ -z "${W_ATTN_LIST- }" ] && return 0
   local rank s key list='' msg skip='' n=0 now=${EPOCHSECONDS:-$(date +%s)}
   local -a fresh=()
   local -A live=()
@@ -672,7 +726,8 @@ _watch_quota_alerts() {
           "$label" "$pct" "${key##*:}" "$(_fmt_reset "$reset")" "$label"
         _watch_alert "$s" "$msg"
       fi
-    else
+    # Only a full pass has everyone's numbers: the account's highest could be an idle agent's.
+    elif (( ${W_FULL:-1} )); then
       unset 'W_QALERTED[$key]'
     fi
   done
@@ -680,7 +735,7 @@ _watch_quota_alerts() {
 }
 
 watchdog_loop() {
-  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=()
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=() W_ACT=()
   local interval=${PRAMA_WATCH_INTERVAL:-5} msg
   [[ "$interval" =~ ^[0-9]+$ ]] && (( interval > 0 )) || interval=5
   tmx select-pane -t "=$(watchdog_session):" -T "watchdog" 2>/dev/null || true
@@ -689,7 +744,7 @@ watchdog_loop() {
   while true; do
     watchdog_tick
     # Exit when the fleet is empty for a while: the next launch starts it again.
-    if [ -z "$(prama_sessions)" ]; then
+    if [ -z "${W_NAMES:-}" ]; then
       (( ${W_IDLE:=0} >= 60 / interval )) && { _tv msg 'No agents left; watchdog finished.'; _watch_log "$msg"; exit 0; }
       (( W_IDLE++ ))
     else

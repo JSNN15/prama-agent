@@ -30,7 +30,6 @@ I18N+=(
   ['They talk over the bus: %sbus assign%s / %sbus report%s.']='Se hablan por el bus: %sbus assign%s / %sbus report%s.'
   ['From your phone']='Desde el celular'
   ['Terminal: use mosh; the cockpit shows one agent per screen (◀ ▶).']='Terminal: usa mosh; el cockpit muestra un agente por pantalla (◀ ▶).'
-  ['No terminal: %sprama-agent telegram setup%s (teams, quota, reports).']='Sin terminal: %sprama-agent telegram setup%s (equipos, cuota, reportes).'
   ['Permissions']='Permisos'
   ['YOLO only on isolated servers: the agent runs commands without asking.']='YOLO solo en servidores aislados: el agente ejecuta sin preguntar.'
 
@@ -165,4 +164,6 @@ I18N+=(
   ['Usage: prama-agent send <session> [--force] "<text>"']='Uso: prama-agent send <sesión> [--force] "<texto>"'
   ["No agent is running in '%s': this text would run as a shell command."]="No hay un agente corriendo en '%s': este texto se ejecutaría como comando de shell."
   ["No agent is running in '%s': this text would run as a shell command. Bring it back: prama-agent fleet restart %s (send --force to type anyway)."]="No hay un agente corriendo en '%s': este texto se ejecutaría como comando de shell. Tráelo de vuelta: prama-agent fleet restart %s (send --force para escribirlo igual)."
+  ['No terminal: Remote Control (--remote) on each agent; optional, %sprama-agent telegram setup%s.']='Sin terminal: Remote Control (--remote) en cada agente; opcional, %sprama-agent telegram setup%s.'
+  ['Telegram is off (PRAMA_TELEGRAM=0). Turn it on: prama-agent telegram on']='Telegram está apagado (PRAMA_TELEGRAM=0). Enciéndelo: prama-agent telegram on'
 )

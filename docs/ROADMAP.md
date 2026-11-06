@@ -60,12 +60,11 @@ spread across machines.
 
 ## Next
 
+- Failures from outside (cron, CI, production) reaching a coordinator, assigned, fixed and closed by re-running the
+  same check against the fix: the piece nobody seems to have joined up yet.
 - Credit and rate-limit telemetry for OpenRouter-backed agents (OpenRouter key endpoint).
 - More interface languages (Portuguese first): a new `lib/lang/<code>/` set of catalogs plus the
   Telegram JSON; `tools/i18n_check.py` already handles several languages.
-- Swarm isolation: an optional git worktree per worker (`swarm --isolate`) with the coordinator merging
-  their branches, and a reviewer role in the default team.
-- A task board from the bus log (assigned · reported · stale) per team, in the menu and in Telegram.
 - `fleet status` history: per-agent cost and quota over time from the bus log.
 - Packaging: Homebrew tap and a `.deb`.
 - Feedback: `feedback export <id> --issue` to open the GitHub issue with `gh` after the operator

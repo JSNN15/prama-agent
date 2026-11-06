@@ -5,7 +5,7 @@
 
 set -u
 
-VERSION="6.15.0"
+VERSION="6.16.0"
 
 # Status line fast path: agy redraws it several times per second, so the last line is reused
 # for PRAMA_SL_MIN seconds with bash builtins only (no forks, before anything else runs).
@@ -71,12 +71,45 @@ if [ "${1:-}" = "--internal-statusline" ]; then
   exit 0
 fi
 
-for _m in core ui agents roles bus swarm worktrees plan health fleet feedback memory setup prefs telegram tui; do
+for _m in core ui agents roles bus swarm worktrees plan health; do
   # shellcheck source=/dev/null
   source "$LIB_DIR/$_m.sh"
 done
 
+# _prama_lazy <module> <function>… — read the first time one of its functions is called. Most commands
+# never touch these, and what a process has loaded makes every fork slower: the watchdog forks all day.
+# Only functions other modules call are listed (tui_styles stays out: its callers test for it, and the
+# module runs it when it loads).
+_prama_lazy() {
+  local m=$1 f; shift
+  for f in "$@"; do
+    # shellcheck disable=SC2016  # expanded when the stub runs
+    eval "$f() { source \"\$LIB_DIR/$m.sh\"; $f \"\$@\"; }"
+  done
+}
+_prama_lazy fleet _fleet_authorize _fleet_kill _fleet_restart _fleet_restart_in_place _fleet_restore subcmd_fleet
+_prama_lazy feedback _feedback_redact feedback_open_count subcmd_feedback
+_prama_lazy memory memory_count subcmd_memory
+_prama_lazy setup _config_set subcmd_login subcmd_setup subcmd_zones
+_prama_lazy prefs _theme_desc prefs_set_lang prefs_set_theme subcmd_lang subcmd_theme
+_prama_lazy tui launch_fzf_cockpit tui_confirm tui_enter_screen tui_leave_screen tui_main tui_prompt tui_select_box
+
 prama_init
+# Telegram, only if it is in use (telegram_notify is what the rest looks for). Asked for by name, it loads
+# then, and says so if it was turned off.
+if telegram_enabled; then
+  # shellcheck source=/dev/null
+  source "$LIB_DIR/telegram.sh"
+else
+  subcmd_telegram() {
+    # shellcheck source=/dev/null
+    source "$LIB_DIR/telegram.sh"
+    if [ "${PRAMA_TELEGRAM:-auto}" = 0 ] && [ "${1:-}" != on ]; then
+      die "$(_t 'Telegram is off (PRAMA_TELEGRAM=0). Turn it on: prama-agent telegram on')"
+    fi
+    subcmd_telegram "$@"
+  }
+fi
 agents_apply_policy
 # The runner is the pane's own process: it sets PRAMA_SESSION itself.
 [ "${1:-}" = "--internal-runner" ] || prama_resolve_caller
@@ -176,7 +209,7 @@ ${C_BOLD}TEAMS${C_OFF}
 ${C_BOLD}SYSTEM${C_OFF}
   worktree list|create|remove|prune   profiles   mcp   agents [--json]
   worktree status|merge|sync|clean    isolated teams: each worker's branch, integrate, catch up, clean
-  telegram setup|start|stop|restart|status|logs|test|notify|alerts|mute   doctor [--restore-tmux-conf]
+  telegram setup|on|off|start|stop|restart|status|logs|test|notify|alerts|mute   doctor [--restore-tmux-conf]
   feedback "<bug>" | list | show <id> | export <id> | close <id>   prama bug reports (from agents)
   completion bash        Shell completion         info  Quick guide           update [version]  Update
 EOF
@@ -239,7 +272,7 @@ ${C_BOLD}EQUIPOS${C_OFF}
 ${C_BOLD}SISTEMA${C_OFF}
   worktree list|create|remove|prune   profiles   mcp   agents [--json]
   worktree status|merge|sync|clean    equipos aislados: rama de cada ejecutor, integrar, poner al día, limpiar
-  telegram setup|start|stop|restart|status|logs|test|notify|alerts|mute   doctor [--restore-tmux-conf]
+  telegram setup|on|off|start|stop|restart|status|logs|test|notify|alerts|mute   doctor [--restore-tmux-conf]
   feedback "<fallo>" | list | show <id> | export <id> | close <id>   Reportes de fallos de prama (agentes)
   completion bash        Autocompletado           info  Guía rápida           update [versión]  Actualizar
 EOF
@@ -289,7 +322,7 @@ subcmd_info() {
   box_sep "$C_BORDER_HI"
   box_row "$C_BORDER_HI" "${C_LIVE}${C_BOLD}$(_t 'From your phone')${C_OFF}"
   box_row "$C_BORDER_HI" "  $(_t 'Terminal: use mosh; the cockpit shows one agent per screen (◀ ▶).')"
-  box_row "$C_BORDER_HI" "  $(_t 'No terminal: %sprama-agent telegram setup%s (teams, quota, reports).' "$C_NEON" "$C_OFF")"
+  box_row "$C_BORDER_HI" "  $(_t 'No terminal: Remote Control (--remote) on each agent; optional, %sprama-agent telegram setup%s.' "$C_NEON" "$C_OFF")"
   box_sep "$C_BORDER_HI"
   box_row "$C_BORDER_HI" "${C_LIVE}${C_BOLD}$(_t 'Permissions')${C_OFF}"
   box_row "$C_BORDER_HI" "  $(perm_badge ask)  ·  $(perm_badge plan)  ·  $(perm_badge yolo)"
@@ -767,7 +800,7 @@ _prama_agent() {
       fi; return ;;
     swarm) COMPREPLY=($(compgen -W "list stop help --team --all --workers --coord --task --model --worker-model --no-open $(prama-agent zones 2>/dev/null | awk '{print $1}')" -- "$cur")); return ;;
     cockpit) COMPREPLY=($(compgen -W "$(prama-agent zones 2>/dev/null | awk '{print $1}') $(prama-agent sessions 2>/dev/null)" -- "$cur")); return ;;
-    telegram) [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=($(compgen -W "setup start stop restart status logs test notify alerts mute" -- "$cur")); return ;;
+    telegram) [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=($(compgen -W "setup on off start stop restart status logs test notify alerts mute" -- "$cur")); return ;;
     worktree) [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=($(compgen -W "list create remove prune status merge sync clean" -- "$cur")); return ;;
     feedback|bug) [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=($(compgen -W "list show export close help" -- "$cur")); return ;;
     memory|memoria) [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=($(compgen -W "list show add clear path help" -- "$cur")); return ;;

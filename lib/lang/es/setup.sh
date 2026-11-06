@@ -70,7 +70,6 @@ I18N+=(
   ['5 · Optional']='5 · Opcional'
   ['Language: %s (prama-agent lang)']='Idioma: %s (prama-agent lang)'
   ['Theme: %s (prama-agent theme)']='Tema: %s (prama-agent theme)'
-  ['Phone: Telegram (prama-agent telegram setup) and mosh (%s)']='Celular: Telegram (prama-agent telegram setup) y mosh (%s)'
   ['installed']='instalado'
   ['Full diagnostics: prama-agent doctor']='Diagnóstico completo: prama-agent doctor'
   ['Done. Next steps']='Listo. Próximos pasos'
@@ -79,4 +78,5 @@ I18N+=(
   ['one agent']='un agente'
   ['architecture']='arquitectura'
   ['a team']='un equipo'
+  ['Phone: Remote Control (--remote) and mosh (%s); optional, Telegram (prama-agent telegram setup)']='Celular: Remote Control (--remote) y mosh (%s); opcional, Telegram (prama-agent telegram setup)'
 )

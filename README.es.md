@@ -49,8 +49,8 @@ Contrastado con la documentación de cada proyecto en noviembre de 2026; las cor
 | CLIs de agentes | Claude Code, agy; OpenCode (experimental) | 20+ | Claude, Codex, Gemini, Aider, cualquiera | 8+ | 11 presets | solo Claude |
 | Una rama de git por agente | ✓ con merge condicionado a tests | comandos de worktree; el merge es tuyo | ✓ | ✓ y contenedores | ✓ con cola de merges | por subagente, opcional |
 | Agentes bloqueados y por qué | hooks del CLI + pantalla | reglas de pantalla + integraciones | pantalla | hooks + pantalla | registro + agentes vigilantes | hooks nativos |
-| Cuota de 5 h / semanal | ✓ alerta al 90 % | — | — | no documentado | — | ✓ |
-| Desde el celular | Telegram, con acciones | SSH, vista angosta | — | panel web | panel web | Remote Control |
+| Cuota de 5 h / semanal | ✓ alerta al 90 %, retiene hasta la renovación | — | — | no documentado | rotación de cuentas (`gt quota`) | ✓ continúa solo |
+| Desde el celular | Remote Control; Telegram con acciones, opcional | SSH, vista angosta | — | panel web | panel web | Remote Control |
 | Plan contrastado con el trabajo | ✓ estancadas, sin verificar, solapadas; corre la verificación de aceptación | — | — | — | registro de issues | lista de tareas compartida |
 | Runtime · licencia | bash + tmux · Apache-2.0 | Rust · Apache-2.0 | Go · AGPL-3.0 | Rust · MIT | Go · MIT | integrado |
 
@@ -59,14 +59,14 @@ máquinas, mouse y plugins, y la coordinación queda en tus manos. **Claude Squa
 de agentes, con pestaña de diff. **Agent of Empires** para muchos CLIs, sandboxes en contenedores y una
 interfaz web. **Gas Town** para más de 20 agentes y una cola de merges que aísla fallas por bisección.
 Los **equipos de agentes de Claude Code** si solo usas Claude y no quieres instalar nada.
-**Conductor** y **Nimbalyst** si prefieres una app de escritorio con revisión de diffs.
+**Agent Deck** si eventos externos (webhooks, GitHub, Slack) deben llegar a un coordinador. **NTM** para muchos CLI con rotación de cuentas y aprobaciones. **Conductor** y **Nimbalyst** si prefieres una app de escritorio con revisión de diffs.
 
 ## Por qué bash
 
 El trabajo es unir tmux, git y los CLIs de agentes en un servidor, y bash con tmux es lo que todo
-servidor ya tiene. El costo son unas 11.000 líneas de bash. Están divididas en módulos con
+servidor ya tiene. El costo son unas 13.000 líneas de bash. Están divididas en módulos con
 responsabilidades claras ([ARCHITECTURE](docs/ARCHITECTURE.md)), pasan shellcheck sin advertencias y las
-cubren unas 270 comprobaciones de punta a punta sobre un servidor tmux aislado, que corren en CI con tmux
+cubren unas 600 comprobaciones de punta a punta sobre un servidor tmux aislado, que corren en CI con tmux
 3.2a, 3.3a y 3.4. Los costos de esa decisión, y cuándo tendría sentido reescribirla, están en el
 [ADR-0001](docs/adr/0001-bash-and-tmux.md) (en inglés).
 
@@ -78,7 +78,7 @@ prama-agent setup            # primeros pasos: acceso de los agentes, zonas (esp
 ```
 
 Necesitas bash ≥ 4.4, tmux ≥ 3.2 y git, más al menos un CLI de agentes con sesión iniciada (`claude` o
-`agy`). Las credenciales quedan en cada CLI. Se recomiendan `jq`, `fzf` y `less`, y el puente de
+`agy`). Las credenciales quedan en cada CLI. El instalador también exige `jq`; se recomiendan `fzf` y `less`, y el puente opcional de
 Telegram necesita `python3` y `curl`. Sin `sudo` se instala para el usuario actual. Probado en Ubuntu
 22.04 y 24.04 y en Debian 12. **[Primeros pasos](docs/GETTING_STARTED.es.md)** va de un servidor vacío a
 varios equipos.
@@ -87,7 +87,7 @@ varios equipos.
 prama-agent                                   # el menú interactivo
 prama-agent swarm backend --team api --workers agy:2 --task "Agrega rate limiting a la API pública"
 prama-agent plan backend --team api           # el plan del equipo, en vivo
-prama-agent telegram setup                    # alertas y control desde el celular
+prama-agent telegram setup                    # opcional: avisos y control desde el celular
 ```
 
 ## Cómo encaja todo

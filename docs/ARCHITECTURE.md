@@ -26,11 +26,14 @@ Internal design reference for contributors (English only). User documentation:
 | `lib/telegram.sh` + `lib/telegram_bot.py` | Telegram bridge |
 | `lib/tui.sh` | Interactive full-screen TUI |
 
-Source order: `core.sh` → `ui.sh` → `agents.sh` → `roles.sh` → `bus.sh` → `swarm.sh` → `worktrees.sh` → `plan.sh` → `health.sh` → `fleet.sh` →
-`feedback.sh` → `memory.sh` → `setup.sh` → `prefs.sh` → `telegram.sh` → `tui.sh` (`core.sh` sources `i18n.sh`). `--internal-hook` and `--internal-statusline` are fast paths that only source
-`core.sh` + `health.sh`; outside prama panes the hook exits before sourcing anything (agy's hooks are
-global), and the status line reuses its last output for `PRAMA_SL_MIN` seconds using bash builtins only
-(agy redraws it several times per second).
+Source order: `core.sh` → `ui.sh` → `agents.sh` → `roles.sh` → `bus.sh` → `swarm.sh` → `worktrees.sh` → `plan.sh` → `health.sh`
+(`core.sh` sources `i18n.sh`). `fleet.sh`, `feedback.sh`, `memory.sh`, `setup.sh`, `prefs.sh` and `tui.sh` are read the first time
+one of their functions is called (`_prama_lazy` in the entrypoint, listing the functions other modules call): what a process has
+loaded makes each of its forks slower, and a stub's first call must not depend on globals set at source time unless they use
+`declare -g`. `telegram.sh` loads after `prama_init` only if `telegram_enabled`; otherwise `subcmd_telegram` loads it on demand.
+`--internal-hook` and `--internal-statusline` are the fast paths: they source only `core.sh` + `health.sh`; outside prama panes the
+hook exits before sourcing anything (agy's hooks are global), and the status line reuses its last output for `PRAMA_SL_MIN` seconds
+using bash builtins only (agy redraws it several times per second).
 Sourcing has **no side effects**; the entrypoint calls `prama_init` (loads config, discovers zones,
 creates private dirs).
 
@@ -127,6 +130,11 @@ creates private dirs).
     verify` runs `--check`, whole. A result (command, merge gate, someone's reading, the operator's word) is
     stored with its commit and kind; changing the task clears it, and a later commit on the owner's branch or to
     the task's files shows it as outdated. A task's owner cannot accept its own work.
+
+**The watchdog's cost.** `watchdog_tick` makes one `list-sessions` call per pass and skips a session when `_watch_quiet` says nothing
+it can be judged by changed since the last pass (window activity, pane state, mtime of its state/health/quota files, its queue), and
+it was READY or WORKING. Anything that can change with the clock or another session (BLOCKED, WAITING, STANDBY, a queue) always gets a
+full look, and everyone does every `PRAMA_WATCH_FULL` passes. A new check that depends on time must not assume it runs every pass.
 
 ## core.sh API
 
