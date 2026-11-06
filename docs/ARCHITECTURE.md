@@ -123,6 +123,11 @@ creates private dirs).
     terminal itself, past tmux's filtering, so it takes only fixed text and session names, strips control
     characters and cannot block its caller (`timeout`).
 
+25. **Evidence answers what was asked, about the work that was there.** `--accept` is text and never runs; `plan
+    verify` runs `--check`, whole. A result (command, merge gate, someone's reading, the operator's word) is
+    stored with its commit and kind; changing the task clears it, and a later commit on the owner's branch or to
+    the task's files shows it as outdated. A task's owner cannot accept its own work.
+
 ## core.sh API
 
 | Function | Purpose |

@@ -44,7 +44,7 @@ per task and kind per hour (`.alerted` keeps the times); a ready task is only re
 it and it has not changed for the stale window.
 
 Evidence written by an agent is a claim. `plan verify T` turns it into an observation: it runs the
-task's `accept` command where the work is (the owner's worktree in an isolated team, otherwise the
+task's `check` command (`accept` is what it has to achieve, in words, and never runs) where the work is (the owner's worktree in an isolated team, otherwise the
 zone's checkout) and stores `time:exit code:commit` in `checked`. A pass also becomes the evidence; a
 failure reopens a task that was marked done and is sent to Telegram. The command was written by the
 coordinator and runs as the same user; it is printed first, and the operator confirms it at a terminal.
@@ -61,8 +61,8 @@ Good:
 Bad:
 - Stale measures silence, not progress: any output in the owner's window counts as activity, so a busy
   agent going in circles is not flagged.
-- Hand-written evidence is still free text, and a task without an `accept` command can only be
-  claimed, not checked. A check proves the command passed at that commit, not that the command tests
+- Hand-written evidence is still free text, and a task without a `check` command can only be read by
+  someone (`plan accept`), not checked. A check proves the command passed at that commit, not that the command tests
   the right thing.
 - `plan verify` runs a command stored in the plan: an explicit exception to "state is data", bounded by
   the same user, the printed command and the operator's confirmation.

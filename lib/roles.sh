@@ -99,14 +99,20 @@ ISOLATED TEAM: each executor works in its own git worktree on branch prama/$team
 - prama-agent worktree merge <session>        merge into '$wt_base' (aborts on conflict: '$wt_base' stays clean)
 - prama-agent worktree sync <session>         bring a branch up to date (or ask the executor to run it)
 Split work so executors touch different files; merge ONE branch at a time, with the tests
-('prama-agent worktree merge <session> --test \"<test command>\"' undoes a merge that breaks them);
+('prama-agent worktree merge <session> --test \"<test command>\"' lands it only if they pass, and
+records the result on that branch's tasks);
 after each merge ask the others to sync. Never let an executor merge into '$wt_base' itself."
     fi
     close_text="
 The team plan (the operator watches it live as a board and a timeline: keep it true):
-- Build it before delegating: prama-agent plan add \"<task>\" --deps T1 --est 30m --scope \"src/x/**\" --accept \"<check>\"
+- Build it before delegating: prama-agent plan add \"<task>\" --deps T1 --est 30m --scope \"src/x/**\" --accept \"<what it has to achieve>\" --check \"<command that proves it, if one can>\"
 - Delegate a task: prama-agent bus assign <session> \"<instruction>\" --task T3   (it becomes in progress)
-- Close it only when verified: prama-agent plan done T3 --evidence \"<test and result, commit>\"
+- Close it only when verified, the way that fits the task:
+    a command proves it: prama-agent plan verify T3 --done (runs its --check on the agent's branch)
+    a merge with --test already passed: prama-agent plan done T3 (the result is on the task)
+    only reading it can tell: someone other than its owner, prama-agent plan accept T3 \"<what was read>\" --done
+    a decision of the operator's: ask them; only they record it, with the same command
+    Otherwise: prama-agent plan done T3 --evidence \"<test and result, commit>\" stays a claim, shown as such.
   (or plan block T3 \"<why>\" / plan drop T3 \"<why>\")
 - When the plan changes: prama-agent plan replan \"<reason>\", then add, drop or re-assign tasks.
 - See it: prama-agent plan · prama-agent plan timeline. prama alerts you about stale tasks, tasks done
@@ -153,14 +159,20 @@ desde '$wt_base'. Tú te quedas en '$wt_base' en la carpeta de la zona e integra
 - prama-agent worktree merge <sesión>         integra en '$wt_base' (aborta si hay conflicto: '$wt_base' queda limpia)
 - prama-agent worktree sync <sesión>          pone al día una rama (o pídele al ejecutor que lo haga)
 Reparte el trabajo para que los ejecutores toquen archivos distintos; integra UNA rama a la vez, con los
-tests ('prama-agent worktree merge <sesión> --test \"<comando de tests>\"' deshace un merge que los rompe);
+tests ('prama-agent worktree merge <sesión> --test \"<comando de tests>\"' la integra solo si pasan, y deja
+el resultado en las tareas de esa rama);
 después de cada merge pide a los demás que hagan sync. Nunca dejes que un ejecutor integre en '$wt_base'."
     fi
     close_text="
 El plan del equipo (el operador lo mira en vivo como tablero y línea de tiempo: mantenlo fiel):
-- Ármalo antes de delegar: prama-agent plan add \"<tarea>\" --deps T1 --est 30m --scope \"src/x/**\" --accept \"<verificación>\"
+- Ármalo antes de delegar: prama-agent plan add \"<tarea>\" --deps T1 --est 30m --scope \"src/x/**\" --accept \"<qué debe lograr>\" --check \"<comando que lo prueba, si se puede>\"
 - Delega una tarea: prama-agent bus assign <sesión> \"<instrucción>\" --task T3   (queda en curso)
-- Ciérrala solo verificada: prama-agent plan done T3 --evidence \"<test y resultado, commit>\"
+- Ciérrala solo verificada, de la forma que calce con la tarea:
+    un comando la prueba: prama-agent plan verify T3 --done (corre su --check en la rama del agente)
+    ya pasó un merge con --test: prama-agent plan done T3 (el resultado está en la tarea)
+    solo leyéndola se sabe: alguien que no sea su responsable, prama-agent plan accept T3 \"<qué se leyó>\" --done
+    una decisión del operador: pregúntale; solo el operador la registra, con el mismo comando
+    Si no: prama-agent plan done T3 --evidence \"<test y resultado, commit>\" queda como afirmación, y se ve así.
   (o plan block T3 \"<por qué>\" / plan drop T3 \"<por qué>\")
 - Si el plan cambia: prama-agent plan replan \"<motivo>\", y luego agrega, quita o reasigna tareas.
 - Míralo: prama-agent plan · prama-agent plan timeline. prama te avisa de tareas estancadas, listas sin

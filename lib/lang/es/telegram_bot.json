@@ -205,6 +205,8 @@
   "<i>No plan yet. The coordinator builds it with prama-agent plan add; ask it from 💬 Talk.</i>": "<i>Aún no hay plan. El coordinador lo arma con prama-agent plan add; pídeselo desde 💬 Hablar.</i>",
   "✅ checked by prama": "✅ verificada por prama",
   "❌ check failed": "❌ verificación fallida",
+  "☑️ read by someone": "☑️ la leyó alguien",
+  "🔁 changed after that": "🔁 cambió después",
   "(screens are not sent from this host: PRAMA_TG_SCREENS=0)": "(las pantallas no se envían desde este servidor: PRAMA_TG_SCREENS=0)",
   "📨 Sent to <b>%s</b>.": "📨 Enviado a <b>%s</b>.",
   "waiting for your answer on its screen": "esperando tu respuesta en su pantalla"

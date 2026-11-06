@@ -6,7 +6,7 @@ it launches), a message bus, a watchdog fed by CLI hooks, per-executor git workt
 shared memory, a full-screen TUI and a Telegram bridge (Python stdlib only).
 
 Read before changing anything:
-- `docs/ARCHITECTURE.md` — module ownership, source order, internal API and the **24 security
+- `docs/ARCHITECTURE.md` — module ownership, source order, internal API and the **25 security
   invariants**. A change that breaks an invariant is a bug even if the tests pass.
 - `CONTRIBUTING.md` — design principles and workflow. `docs/adr/` — why bash/tmux, the private
   server, hooks, a branch per agent, the append-only plan, i18n.

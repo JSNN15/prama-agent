@@ -213,11 +213,11 @@ You should not have to ask the coordinator what it is doing. It keeps the team's
 commands, prama shows it live, and the watchdog checks it against what the agents actually do.
 
 ```bash
-prama-agent plan add "Rotate the JWT keys" --deps T1 --est 90m --scope "src/auth/keys.py" --accept "pytest tests/auth"
+prama-agent plan add "Rotate the JWT keys" --deps T1 --est 90m --scope "src/auth/keys.py" --accept "Keys rotate daily, old tokens still verify" --check "pytest tests/auth"
 prama-agent bus assign prama-backend-sec-agy "Rotate the keys, no downtime" --task T2   # T2 → in progress
 prama-agent bus report "14 passed @3f9c2a1" --task T2                                     # (executor) T2 → review
 prama-agent plan done T2 --evidence "pytest tests/auth: 14 passed"
-prama-agent plan verify T2 --done            # prama runs T2's --accept on the agent's branch: pass → done ✓
+prama-agent plan verify T2 --done            # prama runs T2's --check on the agent's branch: pass → done ✓
 prama-agent plan replan "The audit asks for rate limiting first"                          # r2, kept in the history
 prama-agent plan backend --team sec            # board  ·  plan timeline  ·  plan log  ·  plan html
 ```
@@ -226,12 +226,23 @@ prama-agent plan backend --team sec            # board  ·  plan timeline  ·  p
   📋 Plan**, `v` switches views), in Telegram (team → **📋 Plan**) and as a self-contained HTML file.
 - **Made for plans that change**: every re-plan is a numbered revision with its reason, marked on the
   timeline (↻) and on the tasks it touched (Δ); the history is never rewritten.
-- **Checked, not claimed.** `plan verify T2` (or `plan done T2 --verify`) runs the task's acceptance
-  command (`--accept`) where the work is, the owner's worktree in an isolated team, and records the
-  exit code and the commit: a pass shows as **✓ checked by prama**; a failure shows as **✖**, reopens a
-  task that was marked done and reaches Telegram. Evidence written by hand (`--evidence`, or the text of
-  an agent's `bus report --task`) is kept for what it is, a claim; *done* with no evidence at all is
-  **unverified**. At a terminal, the operator confirms the command before it runs.
+- **Checked, not claimed.** `--accept` says in words what the task has to achieve and is never executed;
+  `--check` is the command that proves it. There are three ways to verify a task, because not all work has
+  a command:
+  - **A command.** `plan verify T2` (or `plan done T2 --verify`) runs `--check` where the work is, the owner's
+    worktree in an isolated team, and records the exit code and the commit: a pass shows as **✓ checked by
+    prama**; a failure shows as **✖**, reopens a task that was marked done and reaches Telegram. At a terminal,
+    the operator confirms the command before it runs.
+  - **The merge gate.** `worktree merge --test` records its result on that branch's open tasks, on its own.
+  - **A reading.** For documents, analysis or decisions, `plan accept T2 "<what was read>"` records who read
+    it and on which commit (**☑ read by someone**). A task's owner cannot accept its own work; the operator's
+    word is recorded as theirs.
+
+  Any of these stops counting when the work or the task changes: reopening or changing the title, files,
+  `--accept` or `--check` clears it, and a commit afterwards on the owner's branch (or, with no branch of its
+  own, to the task's declared files) shows it as **↻ changed after that**. Evidence written by hand
+  (`--evidence`) is kept for what it is, a claim; the text of a `bus report` is history, not evidence; *done*
+  with no evidence at all is **unverified**.
 - **Flags derived from what the agents actually do**: a task *in progress* with no terminal activity
   from its owner for `PRAMA_PLAN_STALE_MIN` (20) minutes is **stale**, one whose owner is gone is an
   **orphan**, two tasks in progress whose declared file scopes overlap are **overlapping**, and a task
@@ -288,7 +299,7 @@ sequenceDiagram
   C->>G: worktree merge agy --test "pytest -q"
   alt tests pass
     G-->>C: merged into main
-    C->>P: plan verify T2 --done (runs its --accept: ✓)
+    C->>P: plan verify T2 --done (runs its --check: ✓)
   else tests fail or conflict
     G-->>C: merge undone, main unchanged
     C->>E: fix it · worktree sync
@@ -444,7 +455,7 @@ Design guarantees (details in [docs/ARCHITECTURE.md](ARCHITECTURE.md)):
 - A **dedicated tmux server**; your own tmux sessions and `~/.tmux.conf` are never touched.
 - Runtime state lives in `~/.local/state/prama-agent` (mode `0700`); nothing in `/tmp`.
 - State, queues and events are data: never `source`d or `eval`ed. (Configuration files are sourced
-  on purpose; `plan verify` runs the coordinator's `--accept` command after showing it.)
+  on purpose; `plan verify` runs the coordinator's `--check` command after showing it.)
 - API keys never appear on a command line (`ps`); they are applied inside the agent's pane.
 - Exact tmux targets: stopping `prama-claude` never closes `prama-claude-backend`.
 - Stopping a session sends TERM, then KILL, to each pane's process group, so an agent that ignores
@@ -567,7 +578,7 @@ the menu, the tmux status bar of every agent and the fzf inspector. Both are als
 | `PRAMA_CLOSED_KEEP` | `30` | ended sessions kept for `prama-agent restore` |
 | `PRAMA_MEMORY_MAX_LINES` | `200` | notes kept per team / zone memory |
 | `PRAMA_PLAN_STALE_MIN` | `20` | minutes without activity before a task in progress is flagged stale |
-| `PRAMA_VERIFY_TIMEOUT` | `1800` | seconds `plan verify` lets an acceptance check run |
+| `PRAMA_VERIFY_TIMEOUT` | `1800` | seconds `plan verify` lets a `--check` run |
 | `PRAMA_EXPERIMENTAL` | `0` | enable experimental agents (OpenCode) |
 
 **Worktrees** (`-w <branch>`) are created outside the repository

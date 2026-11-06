@@ -220,11 +220,11 @@ comandos de una línea, prama lo muestra en vivo y el watchdog lo contrasta con 
 hacen de verdad.
 
 ```bash
-prama-agent plan add "Rotar las llaves JWT" --deps T1 --est 90m --scope "src/auth/keys.py" --accept "pytest tests/auth"
+prama-agent plan add "Rotar las llaves JWT" --deps T1 --est 90m --scope "src/auth/keys.py" --accept "Las llaves rotan a diario y los tokens antiguos siguen valiendo" --check "pytest tests/auth"
 prama-agent bus assign prama-backend-seg-agy "Rota las llaves sin downtime" --task T2   # T2 → en curso
 prama-agent bus report "14 passed @3f9c2a1" --task T2                                    # (ejecutor) T2 → revisión
 prama-agent plan done T2 --evidence "pytest tests/auth: 14 passed"
-prama-agent plan verify T2 --done            # prama corre el --accept de T2 en la rama del agente: pasa → lista ✓
+prama-agent plan verify T2 --done            # prama corre el --check de T2 en la rama del agente: pasa → lista ✓
 prama-agent plan replan "La auditoría pide rate limiting primero"                        # r2, queda en el historial
 prama-agent plan backend --team seg            # tablero  ·  plan timeline  ·  plan log  ·  plan html
 ```
@@ -234,13 +234,23 @@ prama-agent plan backend --team seg            # tablero  ·  plan timeline  · 
   autocontenido.
 - **Hecho para planes que cambian**: cada replanificación es una revisión numerada con su motivo,
   marcada en la línea de tiempo (↻) y en las tareas que tocó (Δ); el historial nunca se reescribe.
-- **Verificado, no declarado.** `plan verify T2` (o `plan done T2 --verify`) corre la verificación de
-  aceptación de la tarea (`--accept`) donde está el trabajo, el worktree del responsable en un equipo
-  aislado, y registra el código de salida y el commit: si pasa, se ve como **✓ verificada por prama**;
-  si falla, como **✖**, reabre la tarea si estaba marcada lista y avisa por Telegram. La evidencia
-  escrita a mano (`--evidence`, o el texto del `bus report --task` de un agente) se guarda como lo que
-  es, una afirmación; *lista* sin ninguna evidencia queda **sin verificar**. En una terminal, el
-  operador confirma el comando antes de que corra.
+- **Verificado, no declarado.** `--accept` dice con palabras qué debe lograr la tarea y nunca se ejecuta;
+  `--check` es el comando que lo prueba. Hay tres formas de verificar una tarea, porque no todo trabajo tiene
+  un comando:
+  - **Un comando.** `plan verify T2` (o `plan done T2 --verify`) corre `--check` donde está el trabajo, el worktree
+    del responsable en un equipo aislado, y registra el código de salida y el commit: si pasa se muestra **✓
+    verificada por prama**; si falla se muestra **✖**, reabre una tarea marcada lista y llega a Telegram. En una
+    terminal, el operador confirma el comando antes de que corra.
+  - **La puerta del merge.** `worktree merge --test` deja su resultado en las tareas abiertas de esa rama, solo.
+  - **Una lectura.** Para documentos, análisis o decisiones, `plan accept T2 "<qué se leyó>"` registra quién lo
+    leyó y sobre qué commit (**☑ la leyó alguien**). El responsable de una tarea no puede aceptar su propio
+    trabajo; la palabra del operador queda como suya.
+
+  Cualquiera de estas deja de valer cuando cambia el trabajo o la tarea: reabrirla o cambiar el título, los
+  archivos, `--accept` o `--check` la borra, y un commit posterior en la rama del responsable (o, sin rama propia,
+  en los archivos declarados de la tarea) la muestra como **↻ cambió después**. La evidencia escrita a mano
+  (`--evidence`) queda como lo que es, una afirmación; el texto de un `bus report` es historial, no evidencia; una
+  tarea *lista* sin evidencia alguna queda **sin verificar**.
 - **Marcas derivadas de lo que los agentes hacen de verdad**: una tarea *en curso* sin actividad en la
   terminal de su responsable durante `PRAMA_PLAN_STALE_MIN` (20) minutos queda **estancada**; una cuyo
   responsable ya no existe queda **sin dueño**; dos tareas en curso cuyos alcances de archivos declarados
@@ -297,7 +307,7 @@ sequenceDiagram
   C->>G: worktree merge agy --test "pytest -q"
   alt los tests pasan
     G-->>C: integrado en main
-    C->>P: plan verify T2 --done (corre su --accept: ✓)
+    C->>P: plan verify T2 --done (corre su --check: ✓)
   else fallan los tests o hay conflicto
     G-->>C: merge deshecho, main intacta
     C->>E: corrígelo · worktree sync
@@ -454,7 +464,7 @@ Garantías de diseño (detalle en [docs/ARCHITECTURE.md](ARCHITECTURE.md)):
 - **Servidor tmux dedicado**: tus sesiones tmux y tu `~/.tmux.conf` nunca se tocan.
 - El estado de ejecución vive en `~/.local/state/prama-agent` (modo `0700`); nada en `/tmp`.
 - Estado, colas y eventos son datos: nunca se ejecutan con `source` ni `eval`. (Los archivos de
-  configuración sí se cargan, a propósito; `plan verify` corre el `--accept` del coordinador después de
+  configuración sí se cargan, a propósito; `plan verify` corre el `--check` del coordinador después de
   mostrarlo.)
 - Las claves de API nunca aparecen en la línea de comandos (`ps`); se aplican dentro del panel.
 - Objetivos tmux exactos: cerrar `prama-claude` nunca cierra `prama-claude-backend`.

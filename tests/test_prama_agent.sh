@@ -676,7 +676,7 @@ assert_true "…and the message carries the task id" "grep -q '\\[T1\\] audit it
 PRAMA_SESSION=tp-pl-t-agy "$BIN" plan set T1 progress=60 >/dev/null 2>&1
 PRAMA_SESSION=tp-pl-t-agy "$BIN" bus report "audit done, 14 tests pass" --task T1 >/dev/null 2>&1
 js=$("$BIN" plan pl --team t json)
-assert_true "bus report --task moves it to review with the evidence" "jq -e '.tasks[0].status == \"review\" and (.tasks[0].evidence | test(\"14 tests\"))' >/dev/null <<< '$js'"
+assert_true "bus report --task moves it to review; what it says is not evidence" "jq -e '.tasks[0].status == \"review\" and .tasks[0].evidence == \"\"' >/dev/null <<< '$js'"
 PRAMA_SESSION=$CO "$BIN" plan start T2 --owner tp-pl-t-agy-2 >/dev/null 2>&1
 out=$(PRAMA_SESSION=$CO "$BIN" plan "done" T2 2>&1)
 assert_contains "done without evidence is flagged" "SIN evidencia" "$out"
@@ -705,12 +705,12 @@ assert_contains "Plan alerts also reach Telegram, with the team's buttons" "TG[t
 assert_true "The cockpit shows the plan live" "$P list-panes -a -F '#{pane_title}' | grep -q 'PLAN'"
 "$BIN" swarm stop pl --team t >/dev/null 2>&1
 assert_true "The plan outlives the team" "$BIN plan pl --team t json | jq -e '.tasks | length == 3' >/dev/null"
-"$BIN" plan pl --team t add "Checked" --accept "echo '14 passed'" >/dev/null 2>&1
+"$BIN" plan pl --team t add "Checked" --check "echo '14 passed'" >/dev/null 2>&1
 out=$("$BIN" plan pl --team t verify T4 --done --yes 2>&1)
-assert_contains "plan verify runs the task's acceptance check" "pasó" "$out"
+assert_contains "plan verify runs the task's check" "pasó" "$out"
 assert_eq "…a pass is recorded as evidence prama saw itself" "done checked" \
   "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T4") | .status + " " + .flags')"
-"$BIN" plan pl --team t add "Broken" --accept "echo '1 failed'; exit 3" >/dev/null 2>&1
+"$BIN" plan pl --team t add "Broken" --check "echo '1 failed'; exit 3" >/dev/null 2>&1
 "$BIN" plan pl --team t "done" T5 --evidence "all good, trust me" >/dev/null 2>&1
 rc=0; out=$("$BIN" plan pl --team t verify T5 --yes 2>&1) || rc=$?
 assert_true "…a failing check fails the command" "[ $rc -ne 0 ] && grep -q 'falló' <<< \"\$out\""
@@ -723,7 +723,135 @@ assert_contains "…a pass on uncommitted changes is not the commit's" "sin comm
 assert_eq "…so it is evidence, but not checked by prama" "done |true" \
   "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T4") | .status + " " + .flags + "|" + (.checked | test("[+]dirty$") | tostring)')"
 rm -f "$PL/uncommitted"
+MARK="$TMP_ROOT/accept-ran"
+"$BIN" plan pl --team t add "Prose" --accept "Looks right; touch $MARK" >/dev/null 2>&1
+rc=0; out=$("$BIN" plan pl --team t verify T6 --yes 2>&1) || rc=$?
+assert_true "--accept is words: it is never executed" "[ $rc -ne 0 ] && [ ! -e '$MARK' ] && [[ \"\$out\" == *'plan accept'* ]]"
+long="test -n '$(printf 'x%.0s' {1..400})'"
+"$BIN" plan pl --team t add "Long check" --check "$long" >/dev/null 2>&1
+assert_eq "A --check is never cut short" "$long" "$("$BIN" plan pl --team t json | jq -r '.tasks[] | select(.id=="T7") | .check')"
+rc=0; out=$("$BIN" plan pl --team t add "Two lines" --check "$(printf 'true # a\nfalse')" 2>&1) || rc=$?
+assert_true "A --check of two lines is refused: flattened, a comment would swallow the second" "[ $rc -ne 0 ]"
+rc=0; out=$("$BIN" plan pl --team t add "Too long" --check "$(printf 'x%.0s' {1..1100})" 2>&1) || rc=$?
+assert_true "…one too long is refused, not cut" "[ $rc -ne 0 ] && [ \"\$($BIN plan pl --team t json | jq '.tasks | length')\" = 7 ]"
+pljq() { "$BIN" plan pl --team t json | jq -r ".tasks[] | select(.id==\"$1\") | $2"; }
+"$BIN" plan pl --team t verify T4 --yes >/dev/null 2>&1
+assert_eq "A clean pass counts" "done checked" "$(pljq T4 '.status + " " + .flags')"
+"$BIN" plan pl --team t start T4 >/dev/null 2>&1
+assert_eq "Reopening a task clears what was seen about it" "doing||" "$(pljq T4 '.status + "|" + .checked + "|" + .evidence')"
+"$BIN" plan pl --team t "done" T4 >/dev/null 2>&1
+assert_eq "…so done again, with nothing new, is unverified" "unverified" "$(pljq T4 .flags)"
+"$BIN" plan pl --team t verify T4 --yes >/dev/null 2>&1
+out=$("$BIN" plan pl --team t set T4 check=false 2>&1)
+assert_eq "A pass answers the check it ran: changing it clears the pass" "unverified" "$(pljq T4 .flags)"
+assert_contains "…and says so" "T4" "$out"
+gitc "$PL" add -A >/dev/null 2>&1; gitc "$PL" commit -qm "ignored files" >/dev/null 2>&1
+"$BIN" plan pl --team t add "Scoped" --scope "a" --check true >/dev/null 2>&1
+"$BIN" plan pl --team t verify T8 --done --yes >/dev/null 2>&1
+echo other > "$PL/b"; gitc "$PL" add b; gitc "$PL" commit -qm other
+assert_eq "A commit that does not touch a task's files leaves its check standing" "checked" "$(pljq T8 .flags)"
+echo more >> "$PL/a"; gitc "$PL" commit -qam "touches a"
+assert_eq "A commit to its files means it was checked on something else" "outdated" "$(pljq T8 .flags)"
+t0=$SECONDS; rc=0; out=$(PRAMA_VERIFY_TIMEOUT=1 bash -c '"$0" plan pl --team t add "Hangs" --check "sleep 30" >/dev/null 2>&1; "$0" plan pl --team t verify T9 --yes 2>&1' "$BIN") || rc=$?
+assert_true "PRAMA_VERIFY_TIMEOUT is honoured" "[ $rc -ne 0 ] && [ $(( SECONDS - t0 )) -lt 10 ]"
 "$BIN" zones remove pl >/dev/null 2>&1
+
+section "Evidence on an isolated team"
+EV="$TMP_ROOT/repos/ev"; mkdir -p "$EV"; git -C "$EV" init -q -b main
+echo base > "$EV/app.txt"; gitc "$EV" add app.txt; gitc "$EV" commit -qm init
+"$BIN" zones add ev "$EV" >/dev/null 2>&1
+"$BIN" swarm ev --team e --workers claude:1,agy:1 --no-open >/dev/null 2>&1
+EC=tp-ev-e-coord EX=tp-ev-e-claude EY=tp-ev-e-agy
+EW="$TMP_ROOT/repos/.prama-worktrees/ev/prama-e-claude" EZ="$TMP_ROOT/repos/.prama-worktrees/ev/prama-e-agy"
+evp() { PRAMA_SESSION=${EVAS:-$EC} "$BIN" plan "$@" 2>&1; }
+evjq() { "$BIN" plan ev --team e json | jq -r ".tasks[] | select(.id==\"$1\") | $2"; }
+evnew() { evp add "$@" >/dev/null; "$BIN" plan ev --team e json | jq -r '.tasks[-1].id'; }
+evc() { echo "$2" > "$1/$2.txt"; gitc "$1" add "$2.txt"; gitc "$1" commit -qm "$2"; }
+evm() { PRAMA_SESSION=$EC "$BIN" worktree merge "$@" >/dev/null 2>&1; }
+T1=$(evnew "Built" --owner "$EX" --check "test -f built.txt")
+evc "$EW" built
+evp verify "$T1" --done >/dev/null
+assert_eq "A check runs on the owner's branch and counts" "done checked" "$(evjq "$T1" '.status + " " + .flags')"
+evc "$EW" more
+assert_eq "A commit on that branch afterwards means it was checked on something else" "outdated" "$(evjq "$T1" .flags)"
+evp verify "$T1" >/dev/null
+assert_eq "…checking it again settles it" "checked" "$(evjq "$T1" .flags)"
+gitc "$EW" reset -q --hard HEAD~1
+assert_eq "…and going back past what was checked is a change too" "outdated" "$(evjq "$T1" .flags)"
+evc "$EW" more2; evp verify "$T1" >/dev/null
+ln -s "$EV" "$EW/deps"
+PRAMA_WORKTREE_LINK=deps PRAMA_SESSION=$EC "$BIN" plan verify "$T1" >/dev/null 2>&1
+assert_eq "A symlink from PRAMA_WORKTREE_LINK is not uncommitted work" "checked" "$(evjq "$T1" .flags)"
+rm -f "$EW/deps"
+evc "$EV" on-the-base
+PRAMA_SESSION=$EX "$BIN" worktree sync >/dev/null 2>&1
+assert_true "A sync with the base brought commits" "[ -f '$EW/on-the-base.txt' ]"
+assert_eq "…and that is not the work changing" "checked" "$(evjq "$T1" .flags)"
+T2=$(evnew "Via merge" --owner "$EX"); evp start "$T2" --owner "$EX" >/dev/null
+T3=$(evnew "Called done" --owner "$EX"); evp "done" "$T3" --evidence "trust me" >/dev/null
+evc "$EW" z
+evm "$EX" --test false
+assert_eq "A failed merge gate reopens a task called done" "doing failed" "$(evjq "$T3" '.status + " " + .flags')"
+assert_eq "…and marks one still open" "doing failed" "$(evjq "$T2" '.status + " " + .flags')"
+evm "$EX" --test "echo verde"
+assert_eq "The merge gate's pass is on the branch's tasks" "merge" "$(evjq "$T2" .proof)"
+assert_contains "…with what it ran" "merge --test: echo verde" "$(evjq "$T2" .evidence)"
+assert_true "…tied to the commit it tested" "[[ \"\$(evjq $T2 .checked)\" == *:0:\$(git -C '$EW' rev-parse --short HEAD) ]]"
+out=$(evp "done" "$T2")
+assert_eq "…so closing it needs nothing more" "checked" "$(evjq "$T2" .flags)"
+assert_not_contains "…and does not warn about evidence" "SIN evidencia" "$out"
+PRAMA_SESSION=$EX "$BIN" worktree sync >/dev/null 2>&1
+assert_eq "…catching up with the base afterwards does not undo it" "checked" "$(evjq "$T2" .flags)"
+evc "$EW" w
+assert_eq "A commit after a pass shows" "outdated" "$(evjq "$T2" .flags)"
+evm "$EX"
+assert_eq "…and a merge with no tests does not make it good again" "outdated" "$(evjq "$T2" .flags)"
+T8=$(evnew "Fails its check" --owner "$EY" --check false); evp start "$T8" --owner "$EY" >/dev/null
+evp verify "$T8" >/dev/null
+out=$(EVAS=$EX evp accept "$T8" "a mí me parece bien"); rc=$?
+assert_true "Someone's reading does not settle a failed check" "[ $rc -ne 0 ] && [[ \"\$(evjq $T8 .checked)\" != *:0:* ]]"
+evc "$EZ" y
+evm "$EY" --test true
+assert_eq "…nor does a merge's pass: it did not run that check" "doing failed" "$(evjq "$T8" '.status + " " + .flags')"
+T9=$(evnew "Landed first" --owner "$EY"); evp start "$T9" --owner "$EY" >/dev/null
+evc "$EZ" y2
+evm "$EY" --test true; evp "done" "$T9" >/dev/null
+evc "$EZ" y3
+evm "$EY" --test false
+assert_eq "A later failed merge does not reopen what already landed" "done" "$(evjq "$T9" .status)"
+TA=$(evnew "Read me" --owner "$EY")
+out=$(EVAS=$EY evp accept "$TA" "lo leí"); rc=$?
+assert_true "A task's owner cannot accept its own work" "[ $rc -ne 0 ] && [ -z \"\$(evjq $TA .checked)\" ]"
+out=$(EVAS=$EX evp accept "$TA"); rc=$?
+assert_true "…nor can anyone without saying what was read" "[ $rc -ne 0 ]"
+EVAS=$EX evp accept "$TA" "leí el informe entero" --done >/dev/null
+assert_eq "Someone else in the team can: a review, on record" "done reviewed review:$EX" "$(evjq "$TA" '.status + " " + .flags + " " + .proof')"
+TB=$(evnew "Decide" --owner "$EY")
+"$BIN" plan ev --team e accept "$TB" "aprobado" --done >/dev/null 2>&1
+assert_eq "The operator's word is recorded as theirs" "done approved operator" "$(evjq "$TB" '.status + " " + .flags + " " + .proof')"
+mock_ctl tp-out interactive; "$BIN" claude alpha --bg --name tp-out >/dev/null
+out=$(EVAS=tp-out evp accept "$TB" "fuera del equipo"); rc=$?
+assert_true "An agent outside the team cannot" "[ $rc -ne 0 ]"
+TC=$(evnew "Uncommitted" --owner "$EX"); echo draft > "$EW/draft.md"
+EVAS=$EY evp accept "$TC" "leí el borrador" --done >/dev/null
+assert_eq "What is not committed on its branch is not what was accepted" "" "$(evjq "$TC" .flags)"
+rm -f "$EW/draft.md"
+TD=$(evnew "Reported" --owner "$EY")
+PRAMA_SESSION=$EY "$BIN" bus report "ya quedó" --task "$TD" >/dev/null 2>&1
+evp "done" "$TD" >/dev/null
+assert_eq "What an agent reports is history, not evidence" "unverified" "$(evjq "$TD" .flags)"
+assert_contains "…the history has it" "ya quedó" "$("$BIN" plan ev --team e log)"
+TE=$(evnew "Outlives its owner" --owner "$EX" --check true)
+evc "$EW" e1; evp verify "$TE" --done >/dev/null; evc "$EW" e2
+"$BIN" fleet kill "$EX" >/dev/null 2>&1
+assert_eq "Closing the worker does not make a changed task good again" "outdated" "$(evjq "$TE" .flags)"
+evm prama/e/claude --test true
+assert_eq "A merge by branch name, of a closed worker, records on its tasks" "merge checked" "$(evjq "$TE" '.proof + " " + .flags')"
+assert_contains "The coordinator's prompt knows the three ways" "plan accept T3" "$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/roles.sh"; build_role_system_prompt coordinator s z')"
+"$BIN" swarm stop ev --team e >/dev/null 2>&1; "$BIN" stop --all -y >/dev/null 2>&1
+out=$(PRAMA_SESSION=ghost-session "$BIN" plan ev --team e accept "$TB" "sin coordinador" 2>&1); rc=$?
+assert_true "With no coordinator, only the operator accepts" "[ $rc -ne 0 ]"
+"$BIN" zones remove ev >/dev/null 2>&1
 
 section "Feedback channel (agents report prama bugs)"
 co=$("$BIN" claude alpha --role coordinator --bg --porcelain 2>/dev/null)

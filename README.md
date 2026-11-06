@@ -25,7 +25,7 @@ or Telegram.
 
 | The agent says… | prama-agent checks |
 | --- | --- |
-| "Done." | `plan verify` runs the task's acceptance command on the agent's own branch and records the exit code and commit. A failure reopens the task. *Done* with no evidence shows as **unverified**. |
+| "Done." | `plan verify` runs the task's check on the agent's own branch and records the exit code and commit; a merge with tests records its result too, and a reading is recorded with who did it. A failure reopens the task, and a later commit shows the check as out of date. *Done* with no evidence shows as **unverified**. |
 | "Ready to merge." | Every agent works in its own git worktree and branch. `worktree merge --test` tries each merge apart, one at a time, and `main` only receives what passed. |
 | "Working on it." | The CLI's own hooks report when an agent is **blocked** and why (login, credit, usage limit, folder trust, model). A task with no terminal activity for 20 minutes is flagged **stale**. |
 | Nothing (it is stuck). | Nothing is typed into a blocked agent: its work is queued and delivered when it is ready. The alert reaches your phone with buttons to look, talk or restart. |
