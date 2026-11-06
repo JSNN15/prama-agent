@@ -52,7 +52,7 @@ for L in $LANGS; do
   wt=$(git -C "$WORK/repos/backend" worktree list --porcelain | awk '/^worktree /{w=$2} /^branch refs\/heads\/prama\/sec\/agy$/{print w}')
   sed -i 's/ring\[-1\]/ring[0]/' "$wt/src/auth/keys.py"
   git -C "$wt" commit -qam "auth: rotate keys daily"
-  PRAMA_SESSION=$C "$P" plan set T2 accept="sh tests/run.sh" >/dev/null 2>&1
+  PRAMA_SESSION=$C "$P" plan set T2 check="sh tests/run.sh" >/dev/null 2>&1
   # T2: "done", no evidence; then prama runs the check itself.
   PRAMA_SESSION=$C _tty "$D/done.ansi" "$P" plan "done" T2
   cap board-unverified 104 15 "$P plan backend --team sec watch"

@@ -239,13 +239,14 @@ _wt_integration() {
   return 0
 }
 
-# _wt_run_bounded <dir> <log> <command> → its exit code. At most PRAMA_MERGE_TEST_TIMEOUT seconds, and
-# nothing it started in the background outlives it (it would write into the next merge's tree, and hold
-# the log open). `timeout` leads its own process group, so the whole group can be ended.
+# _wt_run_bounded <dir> <log> <command> [seconds] → its exit code. A limited time (by default
+# PRAMA_MERGE_TEST_TIMEOUT), and nothing it started in the background outlives it (it would write into
+# the next merge's tree, and hold the log open). `timeout` leads its own process group, so the whole
+# group can be ended.
 _wt_run_bounded() {
-  local dir=$1 log=$2 cmd=$3 pid rc=0
+  local dir=$1 log=$2 cmd=$3 limit=${4:-${PRAMA_MERGE_TEST_TIMEOUT:-1800}} pid rc=0
   (
-    cd "$dir" && _wt_free timeout -k 5 "${PRAMA_MERGE_TEST_TIMEOUT:-1800}" bash -c "$cmd"
+    cd "$dir" && _wt_free timeout -k 5 "$limit" bash -c "$cmd"
   ) >"$log" 2>&1 </dev/null &
   pid=$!
   # shellcheck disable=SC2064  # the pid is meant to be expanded now
@@ -261,7 +262,8 @@ _wt_run_bounded() {
 # were and the worktree as the tests left it, to look at. Tests run in the same folder of the repository
 # as the zone (a zone can be a subfolder).
 _wt_merge_test() {
-  local dir=$1 base=$2 test=$3 log="$WT_IT.log" rc=0 tip out cur
+  local dir=$1 base=$2 test=$3 log="$WT_IT.log" rc=0 tip out cur branch
+  branch=$(git -C "$dir" rev-parse --short "$WT_WB" 2>/dev/null)
   tip=$(git -C "$WT_IT" rev-parse HEAD)
   # Before spending the tests: would the checkout accept the result?
   out=$(git -C "$dir" read-tree -n -u -m HEAD "$tip" 2>&1) \
@@ -269,6 +271,7 @@ _wt_merge_test() {
   info_msg "$(_t 'Running the tests: %s' "$test")"
   _wt_run_bounded "$WT_IT/$(git -C "$dir" rev-parse --show-prefix)" "$log" "$test" || rc=$?
   if (( rc )); then
+    plan_merge_hook "$WT_COORD" "$WT_WB" "$branch" "$rc" "$test"
     bus_event conflict "${PRAMA_SESSION:-operator}" "$WT_W" "tests failed on a merge of $WT_WB (rc=$rc)"
     tail -n 25 "$log" >&2
     die "$(_t 'The tests failed on the merge of %s (code %d): %s did not change. Full output: %s. They ran in %s: if something they need is not there (dependencies), install it there once; otherwise send the failure to %s.' "$WT_WB" "$rc" "$base" "$log" "$WT_IT" "$WT_W")"
@@ -281,6 +284,7 @@ _wt_merge_test() {
     || die "$(_t "The zone's checkout moved to '%s' while the tests ran: nothing landed in %s, merge again." "$cur" "$base")"
   out=$(_wt_free git -C "$dir" merge -q --ff-only "$tip" 2>&1) \
     || die "$(_t 'The tests passed, but %s could not move to the result (did it change while they ran?): nothing landed, merge again. %s' "$base" "${out:0:200}")"
+  plan_merge_hook "$WT_COORD" "$WT_WB" "$branch" 0 "$test"
 }
 
 wt_merge() {
@@ -326,6 +330,7 @@ wt_merge() {
   fi
   if out=$(_wt_free git -C "$tree" "${WT_ID[@]}" merge --no-ff --no-edit -m "Merge $WT_WB (prama: $WT_W)" "$WT_WB" 2>&1); then
     [ -z "$test" ] || _wt_merge_test "$dir" "$base" "$test"
+    [ -n "$test" ] || plan_merge_hook "$WT_COORD" "$WT_WB" "$(git -C "$dir" rev-parse --short "$WT_WB" 2>/dev/null)" '' ''
     bus_event merged "${PRAMA_SESSION:-operator}" "$WT_W" "$WT_WB → $base${test:+ (tested)}"
     ok "$(_t 'Merged %s into %s.' "$WT_WB" "$base")"
     [ -z "${WT_LOCK:-}" ] || exec {WT_LOCK}>&-

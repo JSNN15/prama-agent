@@ -92,10 +92,10 @@ fleet() {   # fleet <lang>
   fi
   "$BIN" claude web --bg >/dev/null 2>&1
   export PRAMA_SESSION=$C
-  "$BIN" plan add "${t[0]}" --est 45m --scope "src/auth/flow/**" --accept "pytest tests/auth" >/dev/null
-  "$BIN" plan add "${t[1]}" --deps T1 --est 90m --scope "src/auth/keys.py" --accept "pytest tests/auth/test_keys.py" >/dev/null
+  "$BIN" plan add "${t[0]}" --est 45m --scope "src/auth/flow/**" --check "pytest tests/auth" >/dev/null
+  "$BIN" plan add "${t[1]}" --deps T1 --est 90m --scope "src/auth/keys.py" --check "pytest tests/auth/test_keys.py" >/dev/null
   "$BIN" plan add "${t[2]}" --deps T2 --est 30m --scope "docs/**" >/dev/null
-  "$BIN" plan add "${t[3]}" --est 2h --scope "src/api/limits/**" --accept "k6 run load/login.js" >/dev/null
+  "$BIN" plan add "${t[3]}" --est 2h --scope "src/api/limits/**" --check "k6 run load/login.js" >/dev/null
   "$BIN" plan add "${t[4]}" --deps T4 --est 1h >/dev/null
   "$BIN" plan start T1 --owner prama-backend-sec-agy >/dev/null 2>&1
   "$BIN" plan "done" T1 --evidence "pytest tests/auth: 14 passed @3f9c2a1" >/dev/null 2>&1

@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.15.0] - 2026-11-06
+
+### Added
+- **`plan accept <id> "<what was read>"`**, for work no command can prove: a document, an analysis, a decision.
+  It records who read it and on which commit. A task's owner cannot accept its own work; the operator's word is
+  recorded as theirs.
+- **`--check "<command>"`**, what `plan verify` runs. It is never cut short: one over 1000 characters is refused.
+- **The merge gate records itself.** `worktree merge --test` puts its result on the open tasks of that branch's
+  owner, with the commit it tested; a failure reopens a task called done.
+
+### Changed
+- **`--accept` is words, and is never executed.** A task that only has `--accept` now needs a `--check`
+  (`plan set T3 check="<command>"`) for `plan verify` to run it. This was a command that real plans filled with
+  prose: `plan verify` ran it through a shell, cut to 200 characters (`rm -rf build/tmp/generated` became
+  `rm -rf build/tm`).
+- The text of a `bus report --task` is history, not evidence: it used to stop a task showing as unverified.
+- The coordinator's prompt says how to close a task each way; it never mentioned `plan verify`.
+
+### Fixed
+- **`✓ checked` stayed after the work changed.** It survived reopening the task, a later commit that broke the check
+  and a change of the check itself. Reopening or changing the title, files, `--accept` or `--check` now clears it, and a
+  commit afterwards on the owner's branch (or, with no branch of its own, to the task's declared files) shows it
+  as `↻ changed after that`.
+- `PRAMA_WORKTREE_LINK` made every check count as uncommitted work.
+- `PRAMA_VERIFY_TIMEOUT` could be overrun by anything a check left in the background.
+
 ## [6.14.0] - 2026-11-06
 
 ### Fixed
