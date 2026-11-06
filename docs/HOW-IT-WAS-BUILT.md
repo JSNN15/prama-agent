@@ -50,7 +50,7 @@ work package to production while v6.6 was being written.
 
 ## How it was checked
 
-- **About 270 end-to-end checks** run on an isolated tmux server, with a private HOME and state. They
+- **About 600 end-to-end checks** run on an isolated tmux server, with a private HOME and state. They
   use mock agents whose process names are `claude` and `agy`. There are also 31 unit tests for the
   Telegram bot.
 - **CI** runs the suite on Ubuntu 22.04, Debian 12 and Ubuntu 24.04 (tmux 3.2a, 3.3a and 3.4), as an
@@ -86,9 +86,9 @@ work package to production while v6.6 was being written.
 
 | | |
 | --- | --- |
-| bash | ~11,000 lines in `bin/` and `lib/`, split into 17 modules |
+| bash | ~13,000 lines in `bin/` and `lib/`, split into 17 modules |
 | Python | the Telegram bridge (~1,300 lines) and the dev tools |
-| Tests | ~270 end-to-end checks, 31 bot unit tests |
+| Tests | ~600 end-to-end checks, 33 bot unit tests |
 | Public history | v5.0.0 on 2026-10-28 to v6.7.0 on 2026-11-01. Versions before 5.0 were never published. |
 
 The design decisions, with their costs and the alternatives, are in the [ADRs](adr/README.md).

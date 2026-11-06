@@ -1545,7 +1545,7 @@ rm -f "$LW/.git/hooks/post-merge"
 echo t2 > "$LWT/prama-m-claude/t2.txt"; gitc "$LWT/prama-m-claude" add t2.txt; gitc "$LWT/prama-m-claude" commit -qm "x: t2"
 t0=$SECONDS; out=$(PRAMA_MERGE_TEST_TIMEOUT=5 lwmerge "$LX" --test true); rc=$?
 assert_true "…and that daemon does not hold the next merge's lock" "[ $rc -eq 0 ] && [ $(( SECONDS - t0 )) -lt 20 ]"
-kill "$(pgrep -f '[s]leep 31338')" 2>/dev/null
+for p in $(pgrep -f '[s]leep 31338'); do kill "$p" 2>/dev/null; done
 echo y2 > "$LWT/prama-m-agy/y2.txt"; gitc "$LWT/prama-m-agy" add y2.txt; gitc "$LWT/prama-m-agy" commit -qm "y: y2"
 mkdir -p "$LW/.integration-decoy/lw/.integration"
 out=$(PRAMA_WORKTREE_ROOT="$LW/.integration-decoy" lwmerge "$LY" --test true); rc=$?
@@ -1697,6 +1697,95 @@ assert_true "…unless the operator stopped it" "! $P has-session -t =tp-watchdo
 PRAMA_WATCHDOG=1 "$BIN" fleet watchdog start >/dev/null 2>&1
 "$BIN" stop --all -y >/dev/null 2>&1
 "$BIN" fleet watchdog stop >/dev/null 2>&1
+
+section "The watchdog: an idle fleet costs one call"
+mock_ctl tp-qt interactive; "$BIN" claude alpha --bg --name tp-qt >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-qt:' | grep -q MOCK_AGENT"
+sleep 1.2
+QLOG="$TMP_ROOT/quiet.log"; : > "$QLOG"
+out=$(QLOG=$QLOG STATE=$STATE P="$P" bash -c "$LIBS"'
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=() W_ACT=()
+  eval "real_$(declare -f detect_session_state)"
+  detect_session_state() { echo "$1" >> "$QLOG"; real_detect_session_state "$@"; }
+  n() { wc -l < "$QLOG"; }
+  tick() { sleep 1.1; watchdog_tick >/dev/null 2>&1; }
+  watchdog_tick >/dev/null 2>&1; echo "first:$(n)"
+  tick; tick; echo "idle:$(n)"
+  printf "HEALTH=blocked\nREASON=auth\nDETAIL=401\nTS=%s\n" "$(date +%s)" > "$STATE/bus/state/tp-qt.health"
+  tick; echo "hook:$(n):${W_PREV[tp-qt]}"
+  rm -f "$STATE/bus/state/tp-qt.health"
+  tick; tick; base=$(n)
+  $P send-keys -t "=tp-qt:" "hola" Enter
+  sleep 0.3; tick; echo "output:$(( $(n) - base ))"
+  tick; tick; base=$(n)
+  queue_push tp-qt "tarea"
+  tick; echo "queue:$(( $(n) - base ))"
+  tick; tick; base=$(n)
+  W_PASS=$(( ${PRAMA_WATCH_FULL:-60} * 2 )); tick; echo "full:$(( $(n) - base ))"
+' 2>&1)
+assert_contains "A first pass looks at every session" "first:1" "$out"
+assert_contains "An idle session is not looked at again" "idle:1" "$out"
+assert_contains "…until its hooks report something: seen at once" ":BLOCKED:auth" "$out"
+assert_contains "…or there is output on its screen" "output:1" "$out"
+assert_contains "…or work is queued for it" "queue:1" "$out"
+assert_contains "…and every PRAMA_WATCH_FULL passes anyway" "full:1" "$out"
+out=$(QLOG=$QLOG STATE=$STATE bash -c "$LIBS"'
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=() W_ACT=()
+  n() { wc -l < "$QLOG"; }
+  eval "real_$(declare -f detect_session_state)"
+  detect_session_state() { echo "$1" >> "$QLOG"; real_detect_session_state "$@"; }
+  tick() { sleep 1.1; watchdog_tick >/dev/null 2>&1; }
+  watchdog_tick >/dev/null 2>&1; tick; tick; base=$(n)
+  # A pass from the command line does not hide what the running watchdog has yet to see.
+  printf "HEALTH=blocked\nREASON=auth\nDETAIL=401\nTS=%s\n" "$(date +%s)" > "$STATE/bus/state/tp-qt.health"
+  ( declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ACT=(); W_ONE_SHOT=1; W_PASS=7; watchdog_tick >/dev/null 2>&1 )
+  tick; echo "one-shot:$(( $(n) - base )):${W_PREV[tp-qt]}"
+  rm -f "$STATE/bus/state/tp-qt.health"; tick; tick
+  # Written in the same second as the mark: still seen.
+  : > "$PRAMA_BUS_DIR/watchdog.beat.$(( (W_PASS + 1) % 2 ))"
+  printf "HEALTH=blocked\nREASON=auth\nDETAIL=401\nTS=%s\n" "$(date +%s)" > "$STATE/bus/state/tp-qt.health"
+  W_LISTED=$(date +%s); watchdog_tick >/dev/null 2>&1; echo "same-second:${W_PREV[tp-qt]}"
+  rm -f "$STATE/bus/state/tp-qt.health"
+  PRAMA_WATCH_FULL=abc; watchdog_tick >/dev/null 2>&1 && echo "bad-full:ok"
+' 2>&1)
+assert_contains "A pass from the command line does not hide a change from the running watchdog" ":BLOCKED:auth" "$(grep one-shot <<< "$out")"
+assert_contains "A write in the mark's own second is still seen" "same-second:BLOCKED:auth" "$out"
+assert_contains "A bad PRAMA_WATCH_FULL does not end a pass" "bad-full:ok" "$out"
+out=$(QF="$STATE/bus/state/tp-qt.quota" bash -c "$LIBS"'
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=() W_ACT=()
+  deliver_to_session() { :; }; n=0
+  printf "Q_TS=%s\nQ_5H=95\nQ_5H_RESET=1999999999\n" "$(date +%s)" > "$QF"
+  watchdog_tick >/dev/null 2>&1; echo "alerted:${#W_QALERTED[@]}"
+  sleep 1.1; W_QGROUP=([x/default:5h]="40|tp-qt|1999999999"); W_FULL=0; _watch_quota_alerts >/dev/null 2>&1
+  W_QALERTED[claude/default:5h]=1; W_QGROUP=([claude/default:5h]="40|tp-qt|1999999999"); W_FULL=0; _watch_quota_alerts >/dev/null 2>&1
+  echo "partial:${W_QALERTED[claude/default:5h]:-cleared}"
+  W_QGROUP=([claude/default:5h]="40|tp-qt|1999999999"); W_FULL=1; _watch_quota_alerts >/dev/null 2>&1
+  echo "full:${W_QALERTED[claude/default:5h]:-cleared}"
+' 2>&1)
+assert_contains "A pass that skipped idle agents does not clear a quota alert" "partial:1" "$out"
+assert_contains "…a full one does" "full:cleared" "$out"
+rm -f "$STATE/bus/state/tp-qt.quota"
+"$BIN" stop --all -y >/dev/null 2>&1
+
+section "Telegram is optional"
+hub() { bash -c "$LIBS"'; telegram_enabled && echo enabled; source "'"$REPO_DIR"'/lib/tui.sh"; echo "${HUB_ACTIONS[*]}"'; }
+assert_not_contains "Not set up, it is not in the menu" "telegram" "$(hub)"
+out=$("$BIN" telegram status 2>&1); rc=$?
+assert_true "…and the command still works, to set it up" "[ $rc -eq 0 ]"
+TGENV="$XDG_CONFIG_HOME/prama-agent/telegram.env"
+printf 'TELEGRAM_BOT_TOKEN="123:abcdefghijklmnopqrstuvwxyz"\nTELEGRAM_CHAT_ID="1"\n' > "$TGENV"
+assert_contains "Once set up, it shows" "telegram" "$(hub)"
+"$BIN" telegram off >/dev/null 2>&1
+assert_true "telegram off is saved" "grep -q '^PRAMA_TELEGRAM=\"\?0' '$XDG_CONFIG_HOME/prama-agent/config.env'"
+assert_not_contains "…and it is gone from the menu, set up or not" "telegram" "$(hub)"
+out=$("$BIN" telegram status 2>&1); rc=$?
+assert_true "…the command says how to turn it on" "[ $rc -ne 0 ] && [[ \"\$out\" == *'telegram on'* ]]"
+"$BIN" telegram on >/dev/null 2>&1
+assert_contains "telegram on brings it back" "telegram" "$(hub)"
+rm -f "$TGENV"
+sed -i '/^PRAMA_TELEGRAM=/d' "$XDG_CONFIG_HOME/prama-agent/config.env"
+out=$("$BIN" telegram alerts --porcelain 2>&1); rc=$?
+assert_true "A module read on first use works like one always loaded" "[ $rc -eq 0 ] && [ \"\$($BIN memory show alpha >/dev/null 2>&1; echo \$?)\" = 0 ] && [ \"\$($BIN lang >/dev/null 2>&1; echo \$?)\" = 0 ] && [ \"\$($BIN feedback list --json | jq -e 'type' >/dev/null; echo \$?)\" = 0 ] && [ \"\$($BIN fleet status --json | jq -e 'type' >/dev/null; echo \$?)\" = 0 ]"
 
 section "UI engine"
 out=$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; str_width "ab"; echo; str_width "🤝 ab"; echo; str_width "✦ x"')

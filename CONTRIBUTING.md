@@ -8,8 +8,8 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Question
 
 ## Design principles
 
-1. **Minimal runtime dependencies.** The control plane is bash ≥ 4.4, tmux ≥ 3.2 and git. `jq`, `fzf`
-   and `less` are optional and must have fallbacks. Python 3 (standard library only) is allowed only
+1. **Minimal runtime dependencies.** The control plane is bash ≥ 4.4, tmux ≥ 3.2, git and `jq` (hooks, quota
+   and plans use it, so the installer requires it). `fzf` and `less` are optional and must have fallbacks. Python 3 (standard library only) is allowed only
    for the optional Telegram bridge (`lib/telegram_bot.py`). No Node.js or compiled dependencies.
 2. **Security invariants first.** Read them in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): never
    `source` or `eval` data, every tmux call goes through `tmx` with exact targets, state only in the

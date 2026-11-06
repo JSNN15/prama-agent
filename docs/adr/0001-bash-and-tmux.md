@@ -14,7 +14,7 @@ messages and showing state.
 
 The control plane is bash ≥ 4.4 over tmux ≥ 3.2 and git. Nothing else is required: no daemon to
 install (the watchdog is a tmux session prama starts on launch and that exits after the fleet has been
-empty for about a minute), no database (state is plain files), no Node.js or Go runtime. `jq`, `fzf`
+empty for about a minute), no database (state is plain files), no Node.js or Go runtime. The installer requires `jq`; `fzf`
 and `less` are optional. Python 3, standard library only, is used for the optional Telegram bridge and
 developer tools. Agents use the same CLI as the operator (`prama-agent bus | plan | fleet …`), so the
 agents' API is a command line.
@@ -26,18 +26,18 @@ Good:
 - Everything is inspectable with `cat` and `tmux -L prama`.
 
 Bad:
-- About 11,000 lines of bash in `bin/` and `lib/` (`lib/tui.sh` alone is ~2,700) is near what bash
+- About 13,000 lines of bash in `bin/` and `lib/` (`lib/tui.sh` alone is ~2,700) is near what bash
   carries well: no types, globals as return values (`WT_*`, `PL_*`, `P_*`), `die` inside `$(…)` only
   exits the subshell (invariant 8), and quoting leaks into design (`printf %q` can emit `$'…'`, so
   prama's tmux server must use bash as `default-shell`; the CI matrix found agents dying for users
   whose login shell was dash).
 - Every hook event and status line refresh starts a bash process; `bin/prama-agent` has fast paths
   that answer before sourcing any module.
-- Some features quietly need `jq`: agy hooks and quota telemetry.
+- `jq` became a requirement: hooks, quota telemetry and plans need it.
 
 Mitigations: one owner per module and written security invariants (`docs/ARCHITECTURE.md`);
 `make lint` (`bash -n`, `shellcheck -S warning -x` on every shell file, `tools/i18n_check.py`);
-`tests/test_prama_agent.sh` (~260 assertions) end to end on an isolated tmux server with a temporary
+`tests/test_prama_agent.sh` (~600 assertions) end to end on an isolated tmux server with a temporary
 `HOME` and mock agents; CI runs it on Ubuntu 22.04, Debian 12 and Ubuntu 24.04 (tmux 3.2a, 3.3a, 3.4)
 as an unprivileged user with a `/bin/sh` login shell. State is data only (`KEY=value` files,
 `\x1f`-separated tables, JSON lines), so another implementation could read it without a migration.

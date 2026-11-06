@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.16.0] - 2026-11-06
+
+### Changed
+- **An idle fleet costs almost nothing.** The watchdog asks tmux once per pass and only looks at a session when
+  something it can be judged by changed: output on its screen, a write to its state, hooks or quota, work queued.
+  Everyone is looked at every `PRAMA_WATCH_FULL` passes (60, about 5 minutes). Measured on an isolated server with
+  mock agents, % of one core: 8 idle agents 44 → about 1, 32 idle agents 84 → about 1, 8 working agents 34 → about 16.
+- **Modules most commands never use are read when first needed** (the menu, Telegram, setup, preferences, feedback,
+  memory, fleet): the watchdog holds 10 MB instead of 14, and every fork it makes is cheaper. State paths are built
+  without subshells, and an idle agent's status line no longer rewrites its quota file.
+- **Telegram is optional, and can be turned off.** Until it is set up nothing of it is loaded or shown. `prama-agent
+  telegram off` (`PRAMA_TELEGRAM=0`) stops the bot and keeps its configuration for `telegram on`. Setup and the docs
+  now point to Remote Control first.
+
+### Fixed
+- `TG_SYSTEM_CONF` was fixed to `/etc/prama-agent`, ignoring `PRAMA_SYSTEM_CONFIG_DIR`: a test run could reach the
+  real Telegram bot.
+- The README's comparison left out Agent Deck and NTM, and said Gas Town has nothing for quota (it has `gt quota`).
+- Docs: sizes, the `jq` requirement (the installer requires it) and shipped items still listed as next.
+
 ## [6.15.0] - 2026-11-06
 
 ### Added

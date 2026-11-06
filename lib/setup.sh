@@ -222,7 +222,7 @@ subcmd_login() {
 # _config_set KEY VALUE — replaces or appends one assignment; only known keys and plain values.
 _config_set() {
   local key=$1 val=$2 f tmp
-  [[ "$key" =~ ^(PRAMA_SKIP_PERMISSIONS|PRAMA_DEFAULT_REMOTE|PRAMA_SWARM_WORKERS|PRAMA_LANG|PRAMA_THEME|PRAMA_TUI_MOUSE)$ ]] || die "$(_t 'Unsupported key: %s' "$key")"
+  [[ "$key" =~ ^(PRAMA_SKIP_PERMISSIONS|PRAMA_DEFAULT_REMOTE|PRAMA_SWARM_WORKERS|PRAMA_LANG|PRAMA_THEME|PRAMA_TUI_MOUSE|PRAMA_TELEGRAM)$ ]] || die "$(_t 'Unsupported key: %s' "$key")"
   [[ "$val" =~ ^[A-Za-z0-9:,._-]*$ ]] || die "$(_t "Unsupported value for %s: '%s'" "$key" "$val")"
   f="$PRAMA_CONFIG_HOME/config.env"
   ensure_private_dir "$PRAMA_CONFIG_HOME"
@@ -352,7 +352,7 @@ subcmd_setup() {
   lang_lbl=$(lang_name "$PRAMA_UI_LANG")
   [ "${PRAMA_LANG:-auto}" = auto ] && lang_lbl+=' (auto)'
   printf '   %s\n' "$(_t 'Language: %s (prama-agent lang)' "$lang_lbl")" "$(_t 'Theme: %s (prama-agent theme)' "$PRAMA_THEME")"
-  printf '   %s\n' "$(_t 'Phone: Telegram (prama-agent telegram setup) and mosh (%s)' \
+  printf '   %s\n' "$(_t 'Phone: Remote Control (--remote) and mosh (%s); optional, Telegram (prama-agent telegram setup)' \
     "$(command -v mosh-server >/dev/null 2>&1 && _t 'installed' || echo 'sudo apt install mosh')")"
   printf '   %s\n' "$(_t 'Full diagnostics: prama-agent doctor')"
 

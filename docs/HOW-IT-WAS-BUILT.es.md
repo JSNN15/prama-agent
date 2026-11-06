@@ -56,8 +56,8 @@ trabajo de pramatic.
 
 ## Cómo se verificó
 
-- **Unas 270 comprobaciones de punta a punta** corren sobre un servidor tmux aislado, con HOME y estado
-  privados. Usan agentes simulados cuyos procesos se llaman `claude` y `agy`. Además hay 31 tests
+- **Unas 600 comprobaciones de punta a punta** corren sobre un servidor tmux aislado, con HOME y estado
+  privados. Usan agentes simulados cuyos procesos se llaman `claude` y `agy`. Además hay 33 tests
   unitarios del bot de Telegram.
 - **CI** corre la suite en Ubuntu 22.04, Debian 12 y Ubuntu 24.04 (tmux 3.2a, 3.3a y 3.4), con un
   usuario sin privilegios cuyo shell de login es `/bin/sh`. También corre shellcheck, actionlint,
@@ -94,9 +94,9 @@ trabajo de pramatic.
 
 | | |
 | --- | --- |
-| bash | ~11.000 líneas en `bin/` y `lib/`, en 17 módulos |
+| bash | ~13.000 líneas en `bin/` y `lib/`, en 17 módulos |
 | Python | el puente de Telegram (~1.300 líneas) y las herramientas de desarrollo |
-| Tests | ~270 comprobaciones de punta a punta y 31 tests unitarios del bot |
+| Tests | ~600 comprobaciones de punta a punta y 33 tests unitarios del bot |
 | Historial público | de la v5.0.0 (2026-10-28) a la v6.7.0 (2026-11-01). Las versiones anteriores a la 5.0 nunca se publicaron. |
 
 Las decisiones de diseño, con sus costos y alternativas, están en los [ADRs](adr/README.md) (en

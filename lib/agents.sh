@@ -215,7 +215,7 @@ preset_names() {
   while IFS= read -r d; do
     for f in "$d"/*.env; do
       [ -f "$f" ] || continue
-      n=$(basename "$f" .env)
+      n=${f##*/} n=${n%.env}
       [ -n "${seen[$n]:-}" ] && continue
       seen[$n]=1; printf '%s\n' "$n"
     done

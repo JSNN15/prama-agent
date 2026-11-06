@@ -15,7 +15,7 @@
 # Config keys: TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID TELEGRAM_USER_ID TELEGRAM_BOT_USERNAME
 #              TELEGRAM_PAIRED_USER
 
-TG_SYSTEM_CONF="/etc/prama-agent/telegram.env"
+TG_SYSTEM_CONF="${PRAMA_SYSTEM_CONFIG_DIR:-/nonexistent}/telegram.env"
 TG_TOKEN_RE='^[0-9]+:[A-Za-z0-9_-]{20,}$'
 TG_CHAT_RE='^-?[0-9]+$'
 TG_PAIR_TIMEOUT="${PRAMA_TG_PAIR_TIMEOUT:-120}"
@@ -394,6 +394,7 @@ telegram_setup_wizard() {
   tg_conf_write "TELEGRAM_BOT_TOKEN=$token" "TELEGRAM_CHAT_ID=$chat" "TELEGRAM_USER_ID=$uid" \
     "TELEGRAM_BOT_USERNAME=$bot_user" "TELEGRAM_PAIRED_USER=${who//[^[:print:]]/}" || return 1
   ok "$(_t 'Telegram linked to %s (config: %s).' "$who" "$(tg_user_conf)")"
+  _tg_watchdog_reload
   telegram_notify "$(_t '✅ Prama Agent v%s linked on %s. Send /menu to control your agents.' "${VERSION:-?}" "$(hostname -s 2>/dev/null || echo host)")"
   if command -v python3 >/dev/null 2>&1; then
     subcmd_telegram restart
@@ -621,11 +622,25 @@ tg_menu() {
   done
 }
 
+# _tg_watchdog_reload — the watchdog decides at start whether Telegram is in use, and it runs for days.
+_tg_watchdog_reload() {
+  declare -F watchdog_running >/dev/null && watchdog_running || return 0
+  "$SELF_PATH" fleet watchdog stop >/dev/null 2>&1
+  "$SELF_PATH" fleet watchdog start >/dev/null 2>&1
+}
+
 subcmd_telegram() {
   local action=${1:-menu}
   shift || true
   case "$action" in
     setup|pair|config) telegram_setup_wizard "$@" ;;
+    on|off)
+      # Saved like the language and the theme.
+      if [ "$action" = off ]; then _config_set PRAMA_TELEGRAM 0; tg_stop >/dev/null 2>&1 || true
+      else _config_set PRAMA_TELEGRAM auto; fi
+      _tg_watchdog_reload
+      if [ "$action" = off ]; then ok "$(_t 'Telegram is off: nothing of it runs or shows.')"
+      else ok "$(_t 'Telegram is on when it is set up: prama-agent telegram setup.')"; fi ;;
     start)   tg_start ;;
     stop)    tg_stop ;;
     restart) tg_stop >/dev/null; tg_start ;;

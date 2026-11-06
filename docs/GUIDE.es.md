@@ -331,8 +331,11 @@ El cockpit rinde mejor en tablet o computador, y está pensado para funcionar ta
   donde SSH se corta. En el servidor: `sudo apt install mosh` y abre UDP 60000-61000; en el celular,
   Termius o Blink: `mosh usuario@servidor -- prama-agent`. `prama-agent doctor` te dice si mosh está
   disponible.
-- **Telegram para una mirada rápida.** Estado del equipo, cuota, hablarle al coordinador o cerrar un
-  equipo, en dos toques desde el bot (ver abajo), sin terminal.
+- **Remote Control para conversar.** Un agente lanzado con `--remote` aparece en la app de Claude: lo lees y le
+  respondes ahí, sin terminal.
+- **Telegram, opcional, para un vistazo.** Ver el estado de un equipo, la cuota, hablar con el coordinador o cerrar
+  un equipo toma dos toques desde el bot (ver abajo). Sin él, prama no tiene cómo avisarte cuando no hay una
+  terminal conectada y ningún agente puede decírtelo.
 
 ## Administración de la flota
 
@@ -487,6 +490,9 @@ Para reportar vulnerabilidades, ver [SECURITY.md](../SECURITY.md).
 
 ## Telegram (control desde el celular)
 
+Opcional. Hasta que lo configures no se carga ni se muestra nada de él, y `prama-agent telegram off`
+(`PRAMA_TELEGRAM=0`) lo apaga si ya está configurado: detiene el bot y deja su configuración para `telegram on`.
+
 ```bash
 prama-agent telegram setup     # pega el token de @BotFather y envía al bot el código de un solo uso
 prama-agent telegram start     # bot 24/7 en una sesión persistente (status | logs | restart | stop)
@@ -572,6 +578,8 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_FLEET_MAX` / `PRAMA_FLEET_SCOPE` | `8` / `zone` | límites de la flota para los agentes |
 | `PRAMA_HOOKS` / `PRAMA_STATUSLINE` | `1` / `1` | hooks de salud / telemetría de cuota |
 | `PRAMA_QUOTA_WARN` | `90` | umbral de alerta de cuota (%) |
+| `PRAMA_WATCH_INTERVAL` | `5` | segundos entre pasadas del watchdog |
+| `PRAMA_WATCH_FULL` | `60` | cada cuántas pasadas el watchdog mira a todos los agentes, hayan cambiado o no |
 | `PRAMA_WATCHDOG` | `1` | watchdog de la flota. Se reinicia solo si falla y vuelve cuando un agente termina un turno, salvo que lo hayas detenido (`fleet watchdog stop`, hasta el próximo lanzamiento) |
 | `PRAMA_SWARM_WORKERS` | `agy:2` | ejecutores por defecto de `swarm` (`auto`: elige el coordinador; `ask`: primero te propone) |
 | `PRAMA_SEND_DELAY` | `0.3` | pausa entre pegar un mensaje en un agente y presionar Enter (s) |
@@ -591,6 +599,7 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_LANG` | `auto` | idioma: `es`, `en`, `auto` (según el locale); `prama-agent lang` |
 | `PRAMA_THEME` | `midnight` | tema de color; `prama-agent theme` los lista |
 | `PRAMA_TUI_MOUSE` | `1` | mouse y toques en el menú |
+| `PRAMA_TELEGRAM` | `auto` | `0` apaga Telegram, aunque esté configurado (`prama-agent telegram on\|off`) |
 | `PRAMA_TG_NOTIFY` | `all` | avisos de Telegram: `all`, `important`, `alerts`, `off` (`/avisos` del bot lo reemplaza) |
 | `PRAMA_CLOSED_KEEP` | `30` | sesiones terminadas que se guardan para `prama-agent restore` |
 | `PRAMA_MEMORY_MAX_LINES` | `200` | notas que guarda cada memoria de equipo / zona |

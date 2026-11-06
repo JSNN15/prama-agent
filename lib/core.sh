@@ -81,10 +81,13 @@ ensure_private_dir() {
   if [ ! -d "$d" ]; then
     (umask 077 && mkdir -p "$d") || die "$(_t 'Could not create %s' "$d")"
   fi
-  local owner
-  owner=$(stat -c %u "$d" 2>/dev/null || stat -f %u "$d" 2>/dev/null || echo "")
-  if [ -n "$owner" ] && [ "$owner" != "$EUID" ]; then
-    die "$(_t 'The directory %s belongs to another user (uid %s); refused for safety.' "$d" "$owner")"
+  # A builtin first: this runs for every command and hook.
+  if [ ! -O "$d" ]; then
+    local owner
+    owner=$(stat -c %u "$d" 2>/dev/null || stat -f %u "$d" 2>/dev/null || echo "")
+    if [ -n "$owner" ] && [ "$owner" != "$EUID" ]; then
+      die "$(_t 'The directory %s belongs to another user (uid %s); refused for safety.' "$d" "$owner")"
+    fi
   fi
   chmod 700 "$d" 2>/dev/null || true
 }
@@ -214,12 +217,14 @@ SESSION_NAME_RE='^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$'
 
 valid_session_name() { [[ "${1:-}" =~ $SESSION_NAME_RE ]]; }
 
-# Turns arbitrary text into a valid session-name fragment.
-slugify() {
-  local s=${1//[^A-Za-z0-9_-]/-}
-  s=${s##+(-)}
-  printf '%s' "${s:0:48}"
+# slugify: turns arbitrary text into a valid session-name fragment.
+# _slug <text> → _S: the same, without a subshell (state paths are built constantly).
+_slug() {
+  _S=${1//[^A-Za-z0-9_-]/-}
+  _S=${_S##+(-)}
+  _S=${_S:0:48}
 }
+slugify() { _slug "$1"; printf '%s' "$_S"; }
 
 # Canonical session name for an agent launch.
 session_name_for() {
@@ -238,6 +243,13 @@ session_name_for() {
 tmx() { tmux -L "$PRAMA_TMUX_SOCKET" -f "$PRAMA_TMUX_CONF" "$@"; }
 
 tmx_running() { tmx list-sessions >/dev/null 2>&1; }
+
+# telegram_enabled — the bridge is optional: unless it was set up (and not turned off, PRAMA_TELEGRAM=0)
+# nothing of it is loaded or shown.
+telegram_enabled() {
+  [ "${PRAMA_TELEGRAM:-auto}" != 0 ] || return 1
+  [ -f "$PRAMA_CONFIG_HOME/telegram.env" ] || { [ -n "$PRAMA_SYSTEM_CONFIG_DIR" ] && [ -f "$PRAMA_SYSTEM_CONFIG_DIR/telegram.env" ]; }
+}
 
 # Exact-match targets: plain "-t name" in tmux does prefix/pattern matching.
 tmx_has()  { tmx has-session -t "=$1" 2>/dev/null; }
@@ -695,7 +707,7 @@ EOF
 }
 
 # ── Session state (KEY=value files; never sourced, never eval'd) ────────────
-state_file() { printf '%s/state/%s.env' "$PRAMA_BUS_DIR" "$(slugify "$1")"; }
+state_file() { _slug "$1"; printf '%s/state/%s.env' "$PRAMA_BUS_DIR" "$_S"; }
 
 # state_write <session> KEY=VALUE...   (atomic replace)
 state_write() {
@@ -715,7 +727,7 @@ state_write() {
 # state_get <session> KEY [default]
 state_get() {
   local f k v
-  f=$(state_file "$1")
+  _slug "$1"; f="$PRAMA_BUS_DIR/state/$_S.env"
   if [ -f "$f" ]; then
     while IFS='=' read -r k v; do
       [ "$k" = "$2" ] && { printf '%s' "$v"; return 0; }
@@ -768,13 +780,13 @@ _kv_merge() {
 # Keys: HEALTH=ok|blocked  REASON  DETAIL  ACTIVITY=working|idle|ended  MODEL  AGENT_SID  TS
 health_file() { local f; f=$(state_file "$1"); printf '%s' "${f%.env}.health"; }
 health_set()  { _kv_merge "$(health_file "$1")" "$@" "TS=${EPOCHSECONDS:-$(date +%s)}"; }
-health_get()  { _kv_get "$(health_file "$1")" "$2" "${3:-}"; }
+health_get()  { _slug "$1"; _kv_get "$PRAMA_BUS_DIR/state/$_S.health" "$2" "${3:-}"; }
 
 # Usage telemetry, written by the CLI status line (statusline_ingest in health.sh).
 # Keys: Q_5H Q_7D (quota used %, highest bucket)  Q_5H_RESET Q_7D_RESET (epoch)  CTX (context
 # used %)  COST (USD)  Q_MODEL  Q_PLAN  Q_TS
-quota_file() { local f; f=$(state_file "$1"); printf '%s' "${f%.env}.quota"; }
-quota_get()  { _kv_get "$(quota_file "$1")" "$2" "${3:-}"; }
+quota_file() { _slug "$1"; printf '%s/state/%s.quota' "$PRAMA_BUS_DIR" "$_S"; }
+quota_get()  { _slug "$1"; _kv_get "$PRAMA_BUS_DIR/state/$_S.quota" "$2" "${3:-}"; }
 # Quota is per account (agent + profile), not per session: the last reading of any session of an
 # account is kept here, so a coordinator can see an exhausted account before launching on it.
 account_quota_file() { printf '%s/accounts/%s-%s.quota' "$PRAMA_BUS_DIR" "$(slugify "$1")" "$(slugify "${2:-default}")"; }
@@ -813,7 +825,7 @@ state_gc() {
   local f s
   for f in "$PRAMA_BUS_DIR"/state/*.env; do
     [ -f "$f" ] || continue
-    s=$(basename "$f" .env)
+    s=${f##*/} s=${s%.env}
     tmx_gone "$s" && state_remove "$s"
   done
 }
@@ -869,7 +881,7 @@ closed_prune() {
 }
 
 # ── Task queues (maildir-style: one file per task, atomic rename to claim) ──
-queue_dir() { printf '%s/inbox/%s' "$PRAMA_BUS_DIR" "$(slugify "$1")"; }
+queue_dir() { _slug "$1"; printf '%s/inbox/%s' "$PRAMA_BUS_DIR" "$_S"; }
 
 # queue_push <target> <text>
 queue_push() {

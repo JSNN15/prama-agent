@@ -107,4 +107,6 @@ I18N+=(
   ['Notifications: important (alerts, reports and teams; no bus traffic)']='Avisos: importantes (alertas, reportes y equipos; sin tráfico del bus)'
   ['Notifications: alerts only (blocked or stopped agents, quota)']='Avisos: solo alertas (agentes bloqueados o detenidos, cuota)'
   ['Notifications: off']='Avisos: desactivados'
+  ['Telegram is off: nothing of it runs or shows.']='Telegram está apagado: no corre ni se muestra nada de él.'
+  ['Telegram is on when it is set up: prama-agent telegram setup.']='Telegram queda activo cuando está configurado: prama-agent telegram setup.'
 )
