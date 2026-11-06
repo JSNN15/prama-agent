@@ -99,6 +99,7 @@ _fleet_json_row() {
 _fleet_quota_json() {
   local s=$1 ts k v out='' sep=''
   ts=$(quota_get "$s" Q_TS 0)
+  [[ "$ts" =~ ^[0-9]+$ ]] || { printf 'null'; return 0; }
   if (( ${EPOCHSECONDS:-$(date +%s)} - ts >= ${PRAMA_QUOTA_STALE:-3600} )); then printf 'null'; return 0; fi
   for k in Q_5H:five_hour_pct Q_5H_RESET:five_hour_resets_at Q_7D:seven_day_pct Q_7D_RESET:seven_day_resets_at \
            CTX:context_pct; do
@@ -438,7 +439,8 @@ _fleet_models() {
 _fleet_watchdog() {
   case "${1:-status}" in
     start)  watchdog_ensure force && ok "$(_t 'Watchdog running (%s).' "$(watchdog_session)")" ;;
-    stop)   tmx_kill "$(watchdog_session)" && ok "$(_t 'Watchdog stopped.')" ;;
+    stop)   touch "$PRAMA_BUS_DIR/watchdog.stopped" 2>/dev/null
+            tmx_kill "$(watchdog_session)" && ok "$(_t 'Watchdog stopped.')" ;;
     logs)   tmx_capture "$(watchdog_session)" "${2:-60}" ;;
     tick)   declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=(); watchdog_tick ;;   # one pass (scripts, cron, tests)
     status) if watchdog_running; then ok "$(_t 'Watchdog running (%s).' "$(watchdog_session)")"
@@ -637,7 +639,7 @@ _fleet_restore_one() {
   BRIEF=''; [ -f "$d/brief" ] && BRIEF=$(cat "$d/brief")
   PASS=(); [ -f "$d/args" ] && mapfile -d '' -t PASS < "$d/args"
   ONESHOT=0 PARALLEL=0 DAEMON_TASK='' DAEMON_INTERVAL=60
-  out=$(RESTORE_SID=$sid PRAMA_PARENT=$parent PRAMA_TEAM=$team PRAMA_TEAM_ISOLATE=${iso:-0} PRAMA_TEAM_BASE=$base \
+  out=$(RESTORE_SID=$sid RESTORE_FOR=$s PRAMA_PARENT=$parent PRAMA_TEAM=$team PRAMA_TEAM_ISOLATE=${iso:-0} PRAMA_TEAM_BASE=$base \
         launch_agent "$agent" "$zone" "$role" "$perm" "$remote" "$profile" "$wt" porcelain "$s") || exit 1
   state_set "$s" ${iso:+"ISOLATE=$iso"} ${base:+"BASE=$base"} ${obj:+"OBJECTIVE=$obj"}
   bus_event restored "$(_fleet_caller)" "$s" "${sid:-new conversation}"

@@ -55,7 +55,8 @@ hook_ingest() {
     UserPromptSubmit)
       health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=working "PROMPT_TS=${EPOCHSECONDS:-$(date +%s)}" "${sid:+AGENT_SID=$sid}" ;;
     Stop)
-      health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=idle "${sid:+AGENT_SID=$sid}" ;;
+      health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=idle "${sid:+AGENT_SID=$sid}"
+      watchdog_revive ;;
     StopFailure)
       local err det
       err=$(json_field "$json" error)
@@ -102,7 +103,8 @@ _hook_ingest_agy() {
         health_set "$s" HEALTH=blocked "REASON=${info%%|*}" "DETAIL=${err:0:200}" ACTIVITY=idle "${sid:+AGENT_SID=$sid}"
       else
         health_set "$s" HEALTH=ok REASON= DETAIL= ACTIVITY=idle "${sid:+AGENT_SID=$sid}"
-      fi ;;
+      fi
+      watchdog_revive ;;
   esac
   return 0
 }
@@ -236,8 +238,10 @@ _fmt_reset() {
 quota_label() {
   local s=$1 q5 q7 ctx ts out='' r
   ts=$(quota_get "$s" Q_TS 0)
+  [[ "$ts" =~ ^[0-9]+$ ]] || return 0
   (( ${EPOCHSECONDS:-$(date +%s)} - ts < ${PRAMA_QUOTA_STALE:-3600} )) || return 0
   q5=$(quota_get "$s" Q_5H) q7=$(quota_get "$s" Q_7D) ctx=$(quota_get "$s" CTX)
+  [[ "$q5" =~ ^[0-9]+$ ]] || q5=''
   if [ -n "$q5" ]; then
     out="5h $q5%"
     (( q5 >= ${PRAMA_QUOTA_WARN:-90} )) && r=$(_fmt_reset "$(quota_get "$s" Q_5H_RESET)") && out+=" ↺$r"
@@ -289,12 +293,24 @@ watchdog_session() { printf "%s-watchdog" "$PRAMA_SESSION_PREFIX"; }
 
 watchdog_running() { tmx_has "$(watchdog_session)"; }
 
+# watchdog_revive — brings it back if it died: called when an agent ends a turn, the moment queued
+# work and alerts matter. Not if the operator stopped it, or there is no server to run it in.
+watchdog_revive() {
+  (( ${PRAMA_WATCHDOG:-1} )) && [ ! -e "$PRAMA_BUS_DIR/watchdog.stopped" ] || return 0
+  tmx_running && ! watchdog_running || return 0
+  watchdog_ensure
+}
+
+# shellcheck disable=SC2120  # `force` comes from lib/fleet.sh
 watchdog_ensure() {
   (( ${PRAMA_WATCHDOG:-1} )) || [ "${1:-}" = force ] || return 0
+  rm -f "$PRAMA_BUS_DIR/watchdog.stopped" 2>/dev/null
   watchdog_running && return 0
   ensure_tmux_conf
   local cmd
-  printf -v cmd '%q --internal-watchdog' "$SELF_PATH"
+  # It restarts itself when it crashes. A clean exit (no agents left) ends the session, and so does not
+  # finding the program (a moved install): the session must not look alive, or nothing would replace it.
+  printf -v cmd 'while :; do %q --internal-watchdog; rc=$?; case $rc in 0|126|127) exit "$rc" ;; esac; sleep 5; done' "$SELF_PATH"
   tmx new-session -d -s "$(watchdog_session)" -x 120 -y 30 -e "PATH=$PATH" \
     ${XDG_CONFIG_HOME:+-e "XDG_CONFIG_HOME=$XDG_CONFIG_HOME"} "$cmd" 2>/dev/null || return 1
 }
@@ -329,6 +345,26 @@ _watch_alert() {
 
 _watch_log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 
+# _watch_limit_until <session> → the known reset holding it, kept in LIMIT_UNTIL; fails when none is known.
+_watch_limit_until() {
+  local s=$1 now=${EPOCHSECONDS:-$(date +%s)} until
+  until=$(_limit_reset_at "$s" "$(health_get "$s" TS 0)" "$now") && (( until > now )) || return 1
+  [ "$(state_get "$s" LIMIT_UNTIL)" = "$until" ] || state_set "$s" "LIMIT_UNTIL=$until"
+  printf '%s' "$until"
+}
+
+# _watch_limit_over <session> <state> — the turn a limit stopped is not finished: when the clock releases
+# it (the hooks still say blocked) it is told to carry on, ahead of what is queued. If it got going some
+# other way (a restart, a prompt that worked) the hooks already say so, and there is nothing to say.
+_watch_limit_over() {
+  local s=$1 st=$2 msg
+  [ -n "$(state_get "$s" LIMIT_UNTIL)" ] || return 0
+  state_set "$s" LIMIT_UNTIL=
+  [ "$st" = READY ] && [ "$(health_get "$s" HEALTH)" = blocked ] || return 0
+  _tv msg '[PRAMA] Your usage limit has reset. Carry on with what you were doing.'
+  queue_push_front "$s" "$msg"
+}
+
 # One pass over the fleet. Uses the global associative arrays W_PREV and W_READY.
 watchdog_tick() {
   local s st info reason detail prev key msg rank
@@ -357,6 +393,13 @@ watchdog_tick() {
             mkdir -p "$PRAMA_BUS_DIR/accounts"
             _kv_merge "$(account_quota_file "$(state_get "$s" AGENT)" "$(state_get "$s" PROFILE default)")" "$s" \
               "BLOCKED_TS=${EPOCHSECONDS:-$(date +%s)}" "BLOCKED_DETAIL=${detail//=/ }"
+            # When it is known, the agent is held until then, and carries on by itself afterwards.
+            local until when
+            if until=$(_watch_limit_until "$s"); then
+              when=$(_fmt_reset "$until")
+              _tv msg 'Usage limit of %s: held until %s.' "$s" "$when"; _watch_log "$msg"
+              detail+=" · ↺$when"
+            fi
           fi
           _tv msg "[PRAMA ALERT] '%s' is BLOCKED (%s): %s. Its tasks stay queued. Options: 'prama-agent fleet restart %s', 'prama-agent fleet model %s <model>', reassign with 'prama-agent bus assign', or tell the operator if it needs a manual login." \
             "$s" "$reason" "${detail:0:160}" "$s" "$s"
@@ -377,9 +420,13 @@ watchdog_tick() {
             _watch_alert "$s" "$msg"
           fi ;;
       esac
+      # Whatever the watchdog saw meanwhile, a limit that was holding this agent is settled now.
+      case $st in READY|WORKING) _watch_limit_over "$s" "$st" ;; esac
       W_PREV[$s]=$key
       W_READY[$s]=0
     fi
+    # The numbers can arrive after the block.
+    [ "$key" != BLOCKED:limit ] || _watch_limit_until "$s" >/dev/null
     if rank=$(_attention_rank "$s" "$st" "$reason"); then attn+=("$rank $s $key"); fi
 
     # A dialog only a person can answer: told once, if it stays open (agents in ask mode hit many,
@@ -549,7 +596,7 @@ _watch_closed() {
     [ -f "${d}spec.env" ] || continue
     s=${d%/}; s=${s##*/}
     [ -z "$(_kv_get "${d}meta" CLOSED)" ] || continue
-    tmx_has "$s" && continue
+    tmx_gone "$s" || continue
     state_remove "$s" vanished
     gone+=("$s")
     bus_event vanished watchdog "$s" "$(_kv_get "${d}spec.env" AGENT)@$(_kv_get "${d}spec.env" ZONE)"
@@ -597,6 +644,7 @@ ${line#\[PRAMA\] }" team "$c"
 _watch_quota_collect() {
   local s=$1 ts q5 q7 grp win pct
   ts=$(quota_get "$s" Q_TS 0)
+  [[ "$ts" =~ ^[0-9]+$ ]] || return 0
   (( ${EPOCHSECONDS:-$(date +%s)} - ts < ${PRAMA_QUOTA_STALE:-3600} )) || return 0
   q5=$(quota_get "$s" Q_5H) q7=$(quota_get "$s" Q_7D)
   grp="$(state_get "$s" AGENT)/$(state_get "$s" PROFILE default)"
@@ -637,6 +685,7 @@ watchdog_loop() {
   [[ "$interval" =~ ^[0-9]+$ ]] && (( interval > 0 )) || interval=5
   tmx select-pane -t "=$(watchdog_session):" -T "watchdog" 2>/dev/null || true
   _tv msg 'Fleet watchdog running (every %ss). Ctrl+C to stop it.' "$interval"; _watch_log "$msg"
+  trap 'touch "$PRAMA_BUS_DIR/watchdog.stopped" 2>/dev/null; exit 0' INT
   while true; do
     watchdog_tick
     # Exit when the fleet is empty for a while: the next launch starts it again.

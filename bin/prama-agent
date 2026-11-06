@@ -5,7 +5,7 @@
 
 set -u
 
-VERSION="6.13.0"
+VERSION="6.14.0"
 
 # Status line fast path: agy redraws it several times per second, so the last line is reused
 # for PRAMA_SL_MIN seconds with bash builtins only (no forks, before anything else runs).
@@ -496,10 +496,15 @@ subcmd_send() {
   # Agents type into other agents only within their guard rails (the bus is their channel).
   [ -n "${PRAMA_SESSION:-}" ] && _fleet_authorize "$target" send
   # Text plus Enter on a dialog answers it: in Claude Code, a permission dialog takes that as "Yes".
-  if [ "$(bus_session_state "$target")" = WAITING ]; then
-    [ -z "${PRAMA_SESSION:-}" ] || die "$(_t "'%s' is waiting for an answer on its screen, and only a person can give it." "$target")"
-    (( force )) || die "$(_t "'%s' is waiting for an answer on its screen: this text would answer it. Look first: prama-agent attach %s (send --force to type anyway)." "$target" "$target")"
-  fi
+  case "$(bus_session_state "$target")" in
+    WAITING)
+      [ -z "${PRAMA_SESSION:-}" ] || die "$(_t "'%s' is waiting for an answer on its screen, and only a person can give it." "$target")"
+      (( force )) || die "$(_t "'%s' is waiting for an answer on its screen: this text would answer it. Look first: prama-agent attach %s (send --force to type anyway)." "$target" "$target")" ;;
+    # The agent stopped and its pane holds a shell: the text would run as a command.
+    STANDBY|SHELL)
+      [ -z "${PRAMA_SESSION:-}" ] || die "$(_t "No agent is running in '%s': this text would run as a shell command." "$target")"
+      (( force )) || die "$(_t "No agent is running in '%s': this text would run as a shell command. Bring it back: prama-agent fleet restart %s (send --force to type anyway)." "$target" "$target")" ;;
+  esac
   tmx_send "$target" "$text" && ok "$(_t "Sent to '%s'." "$target")"
 }
 

@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.14.0] - 2026-11-06
+
+### Fixed
+- **`main` could hold code that had not passed, and merges could undo each other.** `worktree merge --test`
+  merged into the base, tested in the zone's folder and undid on failure: `main` and a folder that services
+  may mount held untested code meanwhile; two merges at once could report success with neither branch in
+  `main`, and an edit made during the tests was lost. The merge is now made and tried in the repository's
+  integration worktree (`.prama-worktrees/<repo>/.integration`), merges into a repository run one at a time,
+  and the base moves by fast-forward only after the tests pass. **Tests now run from another folder**: whatever
+  depends on the folder's name has to be set (for `docker compose`, `name:` in the file).
+- `PRAMA_MERGE_TEST_TIMEOUT` could be overrun by anything the tests left in the background; it is now also ended.
+- The `merged` event says whether the merge was tested.
+- **`restore` could hand a conversation to the wrong agent.** With no tmux server running, the conversation id
+  reached the server's environment, and every agent launched afterwards resumed that conversation.
+- **`worktree sync` threw away a resolution.** Run again before committing a resolved conflict, it aborted the
+  merge. It now refuses, and `worktree merge` refuses over an open merge too.
+- **A usage limit drained the queue into an agent with no quota.** The block expired after `PRAMA_BLOCK_TTL`
+  whatever the reset time said, so a queued task was typed every 15 minutes and failed, and nothing woke the
+  agent at the reset. A limit with a known reset now holds until then, and the agent is told to carry on,
+  ahead of its queue.
+- **`send` to a stopped agent ran the text as a shell command.** It now refuses (`--force` for the operator).
+- **One failed call to tmux wiped the state of live agents**, reported as `vanished`. Only tmux answering that
+  a session does not exist counts now.
+- **The watchdog died silently.** A non-numeric value in a quota file ended it, and nothing brought it back
+  until the next launch. Those values are ignored; it restarts itself if it crashes, and comes back when an agent
+  ends a turn unless the operator stopped it.
+- `bus report --help` was delivered as a report.
+- The scratch recipe in `CLAUDE.md` still loaded the real zones from `/etc/prama-agent`.
+
 ## [6.13.0] - 2026-11-06
 
 ### Added

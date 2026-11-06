@@ -20,8 +20,10 @@ but is not enforced.
   `prama-agent worktree status | merge | sync | clean`.
 - `worktree merge` refuses to run unless the zone's checkout is on the base with no tracked changes,
   merges with `--no-ff`, and on conflict runs `git merge --abort` (unless `--keep-conflicts`), so the
-  base is left as it was. With `--test "<cmd>"` or `PRAMA_MERGE_TEST`, a merge whose tests fail is undone
-  with `git reset --merge ORIG_HEAD`.
+  base is left as it was. With `--test "<cmd>"` or `PRAMA_MERGE_TEST`, the merge is made and tried in an
+  integration worktree of the repository, and the base moves by fast-forward only after it passes. (Until
+  6.14.0 it was merged into the base, tested there and undone on failure: `main` and a live folder held
+  untested code meanwhile, and two merges at once could undo each other.)
 - Only the team's coordinator or the operator merges. An executor commits to its branch and runs
   `worktree sync` itself, which merges the base into its branch and leaves conflicts for it to
   resolve; anyone else's sync aborts on conflict.
@@ -45,7 +47,7 @@ Bad:
   `PRAMA_WORKTREE_LINK="node_modules .venv"`, which symlinks the main checkout's directory and so
   shares its mutable state too. `.env`-style files are copied (`PRAMA_WORKTREE_COPY_FILES`).
 - Integration becomes a serial step on the coordinator; merges are as good as the `--test` command.
-- "Only the coordinator merges" is a guard rail keyed on `PRAMA_SESSION`, not a security boundary:
+- "Only the coordinator merges" is a guard rail keyed on the caller's identity, not a security boundary:
   an executor with a shell can still run `git merge` by hand. Role prompts tell it not to.
 - Merging needs the base checkout free of uncommitted changes to tracked files, so the operator cannot
   keep work in progress there.

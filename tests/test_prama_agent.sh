@@ -1349,6 +1349,227 @@ assert_true "An assistant calling rings too" "wait_for 5 '[ \$(LC_ALL=C grep -ao
 tmux -L "$USER_SOCKET" kill-session -t =ringc 2>/dev/null
 "$BIN" stop --all -y >/dev/null 2>&1
 
+section "Merges: the base only receives what passed"
+LW="$TMP_ROOT/repos/lw"; mkdir -p "$LW"; git -C "$LW" init -q -b main
+printf 'base\n' > "$LW/app.txt"; printf 'notes\n' > "$LW/notes.txt"; printf '.env\ndeps/\n' > "$LW/.gitignore"; printf 'SECRET=1\n' > "$LW/.env"
+gitc "$LW" add app.txt notes.txt .gitignore; gitc "$LW" commit -qm init
+"$BIN" zones add lw "$LW" >/dev/null 2>&1
+"$BIN" swarm lw --team m --workers claude:1,agy:1 --no-open >/dev/null 2>&1
+LWT="$TMP_ROOT/repos/.prama-worktrees/lw"; LC=tp-lw-m-coord; LX=tp-lw-m-claude; LY=tp-lw-m-agy
+lwmerge() { PRAMA_SESSION=$LC "$BIN" worktree merge "$@" 2>&1; }
+pre=$(git -C "$LW" rev-parse HEAD)
+echo one > "$LWT/prama-m-claude/app.txt"; gitc "$LWT/prama-m-claude" commit -qam "x: one"
+DUR="$TMP_ROOT/during.txt"
+out=$(lwmerge "$LX" --test "{ git -C '$LW' rev-parse HEAD; cat '$LW/app.txt'; pwd; cat app.txt; cat .env; } > '$DUR'; exit 1"); rc=$?
+assert_true "A merge that breaks the tests does not land" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ] && [ \"\$(cat '$LW/app.txt')\" = base ]"
+assert_contains "…and says where the full output is" ".integration.log" "$out"
+mapfile -t dur < "$DUR"
+assert_eq "While the tests run, the base has not moved" "$pre" "${dur[0]}"
+assert_eq "…nor its checkout" "base" "${dur[1]}"
+assert_eq "They run in the repository's integration worktree" "$LWT/.integration" "${dur[2]}"
+assert_eq "…on the merged code" "one" "${dur[3]}"
+assert_eq "…with the files worktrees get copied" "SECRET=1" "${dur[4]}"
+assert_contains "A failed merge is on record" "tests failed on a merge" "$(tail -n 1 "$STATE/bus/events.jsonl")"
+mkdir -p "$LWT/.integration/deps"; touch "$LWT/.integration/deps/x" "$LWT/.integration/stray.tmp"
+out=$(lwmerge "$LX" --test "[ ! -e stray.tmp ] && [ -e deps/x ]"); rc=$?
+assert_true "Between merges a stray file goes and what git ignores (dependencies) stays" "[ $rc -eq 0 ]"
+assert_eq "A merge that passes lands" "one" "$(cat "$LW/app.txt")"
+assert_true "…as a merge commit of the branch" "git -C '$LW' log -1 --format=%s | grep -q 'Merge prama/m/claude'"
+assert_contains "…and the record says it was tested" "prama/m/claude → main (tested)" "$(grep '"event":"merged"' "$STATE/bus/events.jsonl" | tail -n 1)"
+echo a > "$LWT/prama-m-claude/a.txt"; gitc "$LWT/prama-m-claude" add a.txt; gitc "$LWT/prama-m-claude" commit -qm "x: a"
+echo b > "$LWT/prama-m-agy/b.txt"; gitc "$LWT/prama-m-agy" add b.txt; gitc "$LWT/prama-m-agy" commit -qm "y: b"
+( lwmerge "$LX" --test 'sleep 1' >/dev/null; echo $? > "$TMP_ROOT/m1" ) & p1=$!
+( lwmerge "$LY" --test 'sleep 1' >/dev/null; echo $? > "$TMP_ROOT/m2" ) & p2=$!
+wait "$p1" "$p2"
+assert_eq "Two merges at once both succeed, one after the other" "0 0" "$(cat "$TMP_ROOT/m1") $(cat "$TMP_ROOT/m2")"
+assert_true "…and both branches are in the base" "git -C '$LW' merge-base --is-ancestor prama/m/claude main && git -C '$LW' merge-base --is-ancestor prama/m/agy main && [ -f '$LW/a.txt' ] && [ -f '$LW/b.txt' ]"
+echo c > "$LWT/prama-m-claude/c.txt"; gitc "$LWT/prama-m-claude" add c.txt; gitc "$LWT/prama-m-claude" commit -qm "x: c"
+out=$(lwmerge "$LX" --test "echo edit >> '$LW/notes.txt'"); rc=$?
+assert_true "An edit made in the checkout during the tests survives the merge" "[ $rc -eq 0 ] && [ -f '$LW/c.txt' ] && grep -q edit '$LW/notes.txt'"
+git -C "$LW" checkout -q notes.txt
+echo d > "$LWT/prama-m-claude/d.txt"; gitc "$LWT/prama-m-claude" add d.txt; gitc "$LWT/prama-m-claude" commit -qm "x: d"
+out=$(lwmerge "$LX" --test "git -C '$LW' -c user.email=t@t -c user.name=t commit --allow-empty -qm by-hand"); rc=$?
+assert_true "If the base moves during the tests nothing lands, and the commit stays" "[ $rc -ne 0 ] && [[ \"\$out\" == *'merge again'* || \"\$out\" == *'de nuevo'* ]] && [ ! -f '$LW/d.txt' ] && [ \"\$(git -C '$LW' log -1 --format=%s)\" = by-hand ]"
+t0=$SECONDS; out=$(PRAMA_MERGE_TEST_TIMEOUT=2 lwmerge "$LX" --test 'sleep 30'); rc=$?
+assert_true "PRAMA_MERGE_TEST_TIMEOUT is honoured" "[ $rc -ne 0 ] && [ $(( SECONDS - t0 )) -lt 10 ] && [ ! -f '$LW/d.txt' ]"
+t0=$SECONDS; out=$(lwmerge "$LX" --test 'sleep 31337 & true'); rc=$?
+assert_true "A process the tests leave behind does not delay the merge" "[ $rc -eq 0 ] && [ $(( SECONDS - t0 )) -lt 10 ] && [ -f '$LW/d.txt' ]"
+assert_true "…and does not outlive it" "! pgrep -f '[s]leep 31337' >/dev/null"
+echo t1 > "$LWT/prama-m-claude/t1.txt"; gitc "$LWT/prama-m-claude" add t1.txt; gitc "$LWT/prama-m-claude" commit -qm "x: t1"
+pre=$(git -C "$LW" rev-parse HEAD)
+out=$(lwmerge "$LX" --test "git checkout -q HEAD~1"); rc=$?
+assert_true "Tests that move the worktree's commit land nothing" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ]"
+out=$(lwmerge "$LX" --test "git -c user.email=t@t -c user.name=t commit --allow-empty -qm from-test"); rc=$?
+assert_true "…nor do tests that commit" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ]"
+out=$(lwmerge "$LX" --test "git -C '$LW' switch -q -c other-branch"); rc=$?
+assert_true "If the checkout changes branch during the tests, nothing lands anywhere" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ] && [ ! -f '$LW/t1.txt' ]"
+git -C "$LW" switch -q main; git -C "$LW" branch -qD other-branch
+echo stray > "$LW/t1.txt"
+t0=$SECONDS; out=$(lwmerge "$LX" --test "sleep 20"); rc=$?
+assert_true "An untracked file in the way stops it before spending the tests" "[ $rc -ne 0 ] && [ $(( SECONDS - t0 )) -lt 10 ] && [ \"\$(cat '$LW/t1.txt')\" = stray ]"
+out=$(lwmerge "$LX" --keep-conflicts); rc=$?
+assert_true "…and is not reported as conflicts left to resolve" "[ $rc -ne 0 ] && ! git -C '$LW' rev-parse -q --verify MERGE_HEAD >/dev/null"
+rm -f "$LW/t1.txt"
+mkdir -p "$LW/.git/hooks"; printf '#!/bin/sh\nnohup sleep 31338 >/dev/null 2>&1 &\n' > "$LW/.git/hooks/post-merge"; chmod +x "$LW/.git/hooks/post-merge"
+out=$(lwmerge "$LX" --test true); rc=$?
+assert_true "A merge with a hook that leaves a daemon behind lands" "[ $rc -eq 0 ] && [ -f '$LW/t1.txt' ]"
+rm -f "$LW/.git/hooks/post-merge"
+echo t2 > "$LWT/prama-m-claude/t2.txt"; gitc "$LWT/prama-m-claude" add t2.txt; gitc "$LWT/prama-m-claude" commit -qm "x: t2"
+t0=$SECONDS; out=$(PRAMA_MERGE_TEST_TIMEOUT=5 lwmerge "$LX" --test true); rc=$?
+assert_true "…and that daemon does not hold the next merge's lock" "[ $rc -eq 0 ] && [ $(( SECONDS - t0 )) -lt 20 ]"
+kill "$(pgrep -f '[s]leep 31338')" 2>/dev/null
+echo y2 > "$LWT/prama-m-agy/y2.txt"; gitc "$LWT/prama-m-agy" add y2.txt; gitc "$LWT/prama-m-agy" commit -qm "y: y2"
+mkdir -p "$LW/.integration-decoy/lw/.integration"
+out=$(PRAMA_WORKTREE_ROOT="$LW/.integration-decoy" lwmerge "$LY" --test true); rc=$?
+assert_true "A plain folder in the integration worktree's place inside the repository is refused" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' symbolic-ref --short HEAD)\" = main ]"
+rm -rf "$LW/.integration-decoy"
+echo x1 > "$LWT/prama-m-claude/app.txt"; gitc "$LWT/prama-m-claude" commit -qam "x: conflict"
+echo y1 > "$LWT/prama-m-agy/app.txt"; gitc "$LWT/prama-m-agy" commit -qam "y: conflict"
+out=$(lwmerge "$LX" --test true); rc=$?
+pre=$(git -C "$LW" rev-parse HEAD)
+out=$(lwmerge "$LY" --test true); rc=$?
+assert_true "A conflict stops a tested merge and leaves the base alone" "[ $rc -ne 0 ] && [[ \"\$out\" == *app.txt* ]] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ] && [ -z \"\$(git -C '$LW' status --porcelain --untracked-files=no)\" ]"
+out=$(lwmerge "$LY" --test true --keep-conflicts); rc=$?
+assert_true "--keep-conflicts leaves them in the zone's checkout" "[ $rc -ne 0 ] && git -C '$LW' diff --name-only --diff-filter=U | grep -q app.txt"
+out=$(lwmerge "$LX"); rc=$?
+assert_true "A merge in the checkout that is not finished is never aborted by another" "[ $rc -ne 0 ] && git -C '$LW' rev-parse -q --verify MERGE_HEAD >/dev/null"
+git -C "$LW" merge --abort
+
+out=$(PRAMA_SESSION=$LY "$BIN" worktree sync 2>&1); rc=$?
+assert_true "worktree sync hands the executor its conflict" "[ $rc -ne 0 ] && git -C '$LWT/prama-m-agy' diff --name-only --diff-filter=U | grep -q app.txt"
+echo 'resolved by hand' > "$LWT/prama-m-agy/app.txt"; git -C "$LWT/prama-m-agy" add app.txt
+out=$(PRAMA_SESSION=$LY "$BIN" worktree sync 2>&1); rc=$?
+assert_true "Syncing again does not throw away a resolution not yet committed" "[ $rc -ne 0 ] && git -C '$LWT/prama-m-agy' rev-parse -q --verify MERGE_HEAD >/dev/null && [ \"\$(cat '$LWT/prama-m-agy/app.txt')\" = 'resolved by hand' ]"
+out=$(PRAMA_SESSION=$LC "$BIN" worktree sync "$LY" 2>&1); rc=$?
+assert_true "…nor does the coordinator's sync" "[ $rc -ne 0 ] && git -C '$LWT/prama-m-agy' rev-parse -q --verify MERGE_HEAD >/dev/null"
+"$BIN" stop --all -y >/dev/null 2>&1
+
+SUB="$TMP_ROOT/repos/subz"; mkdir -p "$SUB/pkg"; git -C "$SUB" init -q -b main
+echo base > "$SUB/pkg/app.txt"; gitc "$SUB" add pkg; gitc "$SUB" commit -qm init
+"$BIN" zones add subz "$SUB/pkg" >/dev/null 2>&1
+"$BIN" swarm subz --team s --workers claude:1 --no-open >/dev/null 2>&1
+SW=$(sed -n 's/^TARGET_DIR=//p' "$STATE/bus/state/tp-subz-s-claude.env")
+if [ -n "$SW" ] && [ -d "$SW" ]; then
+  echo two > "$SW/pkg/app2.txt"; gitc "$SW" add pkg; gitc "$SW" commit -qm two
+  out=$(PRAMA_SESSION=tp-subz-s-coord "$BIN" worktree merge tp-subz-s-claude --test "pwd > '$TMP_ROOT/subdir.txt'; test -f app2.txt" 2>&1); rc=$?
+  assert_true "A zone in a subfolder tests from that subfolder" "[ $rc -eq 0 ] && [[ \"\$(cat '$TMP_ROOT/subdir.txt')\" == */pkg ]]"
+fi
+"$BIN" stop --all -y >/dev/null 2>&1; "$BIN" zones remove subz >/dev/null 2>&1
+
+section "Conversations, limits and messages stay where they belong"
+mock_ctl tp-rv interactive; "$BIN" claude alpha --bg --name tp-rv >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-rv:' | grep -q MOCK_AGENT"
+sid=$(sed -n 's/^SESSION_ID=//p' "$STATE/bus/state/tp-rv.env")
+$P kill-server; sleep 0.5
+out=$("$BIN" restore tp-rv 2>&1); rc=$?
+assert_true "restore starts the server when there is none" "[ $rc -eq 0 ] && $P has-session -t =tp-rv"
+assert_eq "…in the same conversation" "$sid" "$(sed -n 's/^SESSION_ID=//p' "$STATE/bus/state/tp-rv.env")"
+assert_true "…and its conversation does not reach the server's environment" "! $P show-environment -g RESTORE_SID >/dev/null 2>&1"
+mock_ctl tp-rw interactive; "$BIN" claude alpha --bg --name tp-rw >/dev/null
+assert_true "An agent launched afterwards gets its own conversation" "[ \"\$(sed -n 's/^SESSION_ID=//p' '$STATE/bus/state/tp-rw.env')\" != '$sid' ]"
+mock_ctl tp-ry interactive; RESTORE_SID=$sid RESTORE_FOR=tp-rv "$BIN" claude alpha --bg --name tp-ry >/dev/null
+assert_true "…even if the variable is in its environment" "[ \"\$(sed -n 's/^SESSION_ID=//p' '$STATE/bus/state/tp-ry.env')\" != '$sid' ]"
+"$BIN" stop --all -y >/dev/null 2>&1
+
+mock_ctl tp-qh interactive; "$BIN" claude alpha --bg --name tp-qh >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-qh:' | grep -q MOCK_AGENT"
+now=$(date +%s)
+printf 'HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n' "$now" > "$STATE/bus/state/tp-qh.health"
+printf 'Q_TS=%s\nQ_5H=100\nQ_5H_RESET=%s\n' "$now" "$(( now + 14400 ))" > "$STATE/bus/state/tp-qh.quota"
+"$BIN" bus assign tp-qh "tarea-en-cola" >/dev/null 2>&1
+out=$(PRAMA_BLOCK_TTL=0 QF="$STATE/bus/state/tp-qh.quota" bash -c "$LIBS"'
+  sleep 1.1; declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=()
+  for i in 1 2 3; do watchdog_tick >/dev/null 2>&1; done
+  printf "%s|%s|%s\n" "$(bus_session_state tp-qh)" "$(queue_len tp-qh)" "$(state_get tp-qh LIMIT_UNTIL)"
+  printf "Q_TS=%s\nQ_5H=100\nQ_5H_RESET=%s\n" "$(date +%s)" "$(( $(date +%s) - 1 ))" > "$QF"
+  watchdog_tick >/dev/null 2>&1
+  printf "%s|%s|%s\n" "$(bus_session_state tp-qh)" "$(queue_len tp-qh)" "$(state_get tp-qh LIMIT_UNTIL)"
+  for i in 1 2 3 4 5 6; do watchdog_tick >/dev/null 2>&1; sleep 0.3; done
+  printf "%s\n" "$(queue_len tp-qh)"
+' 2>&1 | tail -n 3)
+mapfile -t res <<< "$out"
+assert_eq "A limit whose reset is known holds past the block's TTL, queue included" "BLOCKED|1|$(( now + 14400 ))" "${res[0]}"
+assert_eq "…and at the reset the agent is free, with word to carry on ahead of its queue" "READY|2|" "${res[1]}"
+assert_eq "…which then reaches it" "0" "${res[2]}"
+got=$($P capture-pane -p -J -t '=tp-qh:' -S -80 | sed -n 's/^GOT: //p')
+assert_true "…in that order" "[[ \"\$(head -n 1 <<< \"\$got\")\" == '[PRAMA]'* ]] && [[ \"\$(tail -n 1 <<< \"\$got\")\" == *tarea-en-cola* ]]"
+printf 'HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n' "$(( now - 2000 ))" > "$STATE/bus/state/tp-qh.health"
+printf 'Q_TS=%s\nQ_5H=40\nQ_5H_RESET=%s\n' "$now" "$(( now + 14400 ))" > "$STATE/bus/state/tp-qh.quota"
+assert_eq "A limit no window explains still expires with its TTL" "READY" "$(st tp-qh .state)"
+printf 'HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n' "$now" > "$STATE/bus/state/tp-qh.health"
+printf 'Q_TS=%s\nQ_5H=40\nQ_5H_RESET=%s\n' "$now" "$(( now + 14400 ))" > "$STATE/bus/state/tp-qh.quota"
+out=$(QF="$STATE/bus/state/tp-qh.quota" HF="$STATE/bus/state/tp-qh.health" bash -c "$LIBS"'
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=()
+  watchdog_tick >/dev/null 2>&1; printf "first:%s\n" "$(state_get tp-qh LIMIT_UNTIL)"
+  printf "Q_TS=%s\nQ_5H=100\nQ_5H_RESET=%s\n" "$(date +%s)" "$(( $(date +%s) + 14400 ))" > "$QF"
+  watchdog_tick >/dev/null 2>&1; printf "later:%s\n" "$(state_get tp-qh LIMIT_UNTIL)"
+  rm -f "$HF"
+  watchdog_tick >/dev/null 2>&1
+  printf "restart:%s:%s:%s\n" "$(bus_session_state tp-qh)" "$(state_get tp-qh LIMIT_UNTIL)" "$(queue_len tp-qh)"
+  state_set tp-qh "LIMIT_UNTIL=$(( $(date +%s) - 5 ))"
+  printf "HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n" "$(( $(date +%s) - 10 ))" > "$HF"
+  printf "Q_TS=%s\nQ_5H=100\nQ_5H_RESET=%s\n" "$(date +%s)" "$(( $(date +%s) - 5 ))" > "$QF"
+  declare -gA W_PREV=() W_READY=()
+  watchdog_tick >/dev/null 2>&1
+  printf "down:%s:%s\n" "$(state_get tp-qh LIMIT_UNTIL)" "$(queue_len tp-qh)"
+' 2>&1)
+assert_contains "A limit whose numbers arrive after the block is held too" "later:1" "$out"
+assert_contains "If it gets going before the reset (a restart), nothing says the limit reset" "restart:READY::0" "$out"
+assert_contains "A reset that passed while the watchdog was down still tells it to carry on" "down::1" "$out"
+"$BIN" stop --all -y >/dev/null 2>&1
+
+MARK="$TMP_ROOT/send-mark"
+"$BIN" claude alpha --bg --name tp-sb >/dev/null
+wait_for 10 "$P capture-pane -p -t '=tp-sb:' | grep -q PRAMA_STANDBY"
+out=$("$BIN" send tp-sb "touch $MARK" 2>&1); rc=$?
+sleep 0.5
+assert_true "send refuses a stopped agent: its pane is a shell" "[ $rc -ne 0 ] && [ ! -e '$MARK' ]"
+mock_ctl tp-sc interactive; "$BIN" claude alpha --bg --name tp-sc >/dev/null
+out=$(PRAMA_SESSION=tp-sc "$BIN" send tp-sb --force "touch $MARK" 2>&1); rc=$?
+sleep 0.5
+assert_true "…an agent cannot force it" "[ $rc -ne 0 ] && [ ! -e '$MARK' ]"
+# One harmless key: the pane is the supervisor's menu, and letters in a longer text would be its actions.
+out=$("$BIN" send tp-sb --force "x" 2>&1); rc=$?
+assert_true "…the operator can" "[ $rc -eq 0 ]"
+n=$(wc -l < "$STATE/bus/events.jsonl")
+out=$(PRAMA_SESSION=tp-sc "$BIN" bus report --help 2>&1)
+assert_contains "bus report --help prints the usage" "prama-agent bus <" "$out"
+assert_eq "…and reports nothing" "$n" "$(wc -l < "$STATE/bus/events.jsonl")"
+"$BIN" stop --all -y >/dev/null 2>&1
+
+section "The watchdog holds on"
+mock_ctl tp-gn interactive; "$BIN" claude alpha --bg --name tp-gn >/dev/null
+wait_for 5 "$P capture-pane -p -t '=tp-gn:' | grep -q MOCK_AGENT"
+out=$(bash -c "$LIBS"'
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=()
+  tmx() { [ "$1" = has-session ] && return 1; command tmux -L "$PRAMA_TMUX_SOCKET" -f "$PRAMA_TMUX_CONF" "$@"; }
+  state_gc; _watch_closed; [ -f "$(state_file tp-gn)" ] && echo kept' 2>&1)
+assert_eq "A failed call to tmux does not wipe the state of a live session" "kept" "$out"
+assert_not_contains "…nor report it gone" '"to":"tp-gn","text":"claude@' "$(grep '"event":"vanished"' "$STATE/bus/events.jsonl" | tail -n 3)"
+assert_eq "tmux answering that it is gone still counts" "gone" "$(bash -c "$LIBS"'; tmx_gone tp-nope && echo gone')"
+printf 'Q_TS=abc\nQ_5H=12x\nQ_7D=oops\n' > "$STATE/bus/state/tp-gn.quota"
+out=$("$BIN" fleet watchdog tick 2>&1); rc=$?
+assert_true "A quota file with garbage does not end a watchdog pass" "[ $rc -eq 0 ]"
+assert_true "…nor the listings" "'$BIN' fleet status --json | jq -e '.[] | select(.session==\"tp-gn\")' >/dev/null"
+rm -f "$STATE/bus/state/tp-gn.quota"
+PRAMA_WATCHDOG=1 "$BIN" fleet watchdog start >/dev/null 2>&1
+wait_for 3 "$P has-session -t =tp-watchdog 2>/dev/null"
+wd_child() { pgrep -P "$($P list-panes -t =tp-watchdog -F '#{pane_pid}' 2>/dev/null | head -n 1)" 2>/dev/null | head -n 1; }
+wait_for 5 '[ -n "$(wd_child)" ]'
+w1=$(wd_child); kill -9 "$w1" 2>/dev/null
+assert_true "A watchdog that crashes starts again" "wait_for 10 '[ -n \"\$(wd_child)\" ] && [ \"\$(wd_child)\" != $w1 ]'"
+stop_hook() { printf '{"hook_event_name":"Stop","session_id":"s"}' | PRAMA_WATCHDOG=1 PRAMA_SESSION=tp-gn "$BIN" --internal-hook claude >/dev/null 2>&1; }
+kill -9 "$($P list-panes -t =tp-watchdog -F '#{pane_pid}' | head -n 1)" 2>/dev/null
+wait_for 5 "! $P has-session -t =tp-watchdog 2>/dev/null"
+stop_hook
+assert_true "A session that was killed comes back when an agent ends a turn" "wait_for 5 '$P has-session -t =tp-watchdog 2>/dev/null'"
+"$BIN" fleet watchdog stop >/dev/null 2>&1
+stop_hook; sleep 0.5
+assert_true "…unless the operator stopped it" "! $P has-session -t =tp-watchdog 2>/dev/null"
+PRAMA_WATCHDOG=1 "$BIN" fleet watchdog start >/dev/null 2>&1
+"$BIN" stop --all -y >/dev/null 2>&1
+"$BIN" fleet watchdog stop >/dev/null 2>&1
+
 section "UI engine"
 out=$(bash -c 'source "'"$REPO_DIR"'/lib/core.sh"; source "'"$REPO_DIR"'/lib/ui.sh"; str_width "ab"; echo; str_width "🤝 ab"; echo; str_width "✦ x"')
 assert_eq "Display width counts emoji as 2 columns" $'2\n5\n3' "$out"

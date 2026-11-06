@@ -163,4 +163,6 @@ I18N+=(
   [''\''%s'\'' is waiting for an answer on its screen, and only a person can give it.']=''\''%s'\'' espera una respuesta en su pantalla, y solo una persona puede darla.'
   [''\''%s'\'' is waiting for an answer on its screen: this text would answer it. Look first: prama-agent attach %s (send --force to type anyway).']=''\''%s'\'' espera una respuesta en su pantalla: este texto la respondería. Mira primero: prama-agent attach %s (send --force para escribir de todos modos).'
   ['Usage: prama-agent send <session> [--force] "<text>"']='Uso: prama-agent send <sesión> [--force] "<texto>"'
+  ["No agent is running in '%s': this text would run as a shell command."]="No hay un agente corriendo en '%s': este texto se ejecutaría como comando de shell."
+  ["No agent is running in '%s': this text would run as a shell command. Bring it back: prama-agent fleet restart %s (send --force to type anyway)."]="No hay un agente corriendo en '%s': este texto se ejecutaría como comando de shell. Tráelo de vuelta: prama-agent fleet restart %s (send --force para escribirlo igual)."
 )

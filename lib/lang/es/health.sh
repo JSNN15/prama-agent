@@ -28,4 +28,6 @@ I18N+=(
   ['▲ %s needs you']='▲ %s te necesita'
   ['▲ %s agents need you']='▲ %s agentes te necesitan'
   ['[PRAMA ALERT] '\''%s'\'' is waiting for an answer on its screen (a permission or a question), and only a person can give it: prama-agent attach %s']='[ALERTA PRAMA] '\''%s'\'' espera una respuesta en su pantalla (un permiso o una pregunta), y solo una persona puede darla: prama-agent attach %s'
+  ['Usage limit of %s: held until %s.']='Límite de uso de %s: en espera hasta %s.'
+  ['[PRAMA] Your usage limit has reset. Carry on with what you were doing.']='[PRAMA] Tu límite de uso se renovó. Sigue con lo que estabas haciendo.'
 )

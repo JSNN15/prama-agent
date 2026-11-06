@@ -120,13 +120,21 @@ e integra.
 ```bash
 prama-agent swarm backend --team seg --workers agy:2        # aislado (por defecto; --shared para no)
 prama-agent worktree status backend --team seg              # cada rama: por integrar, sin commit, atraso
-prama-agent worktree merge prama-backend-seg-agy --test "pytest -q"   # integra; se deshace si fallan los tests
+prama-agent worktree merge prama-backend-seg-agy --test "pytest -q"   # integra solo si pasan los tests
 prama-agent worktree sync prama-backend-seg-agy-2           # pone una rama al día con la base
 ```
 
 - `merge` rechaza un checkout base con cambios y **aborta si hay conflicto**: la base nunca queda rota;
   el ejecutor hace `worktree sync`, resuelve en su worktree, hace commit y el coordinador vuelve a
-  integrar. Con `--test` (o `PRAMA_MERGE_TEST`) un merge que rompe los tests se deshace.
+  integrar. Con `--test` (o `PRAMA_MERGE_TEST`) el merge se hace y se prueba aparte, en el worktree de
+  integración del repositorio (`.prama-worktrees/<repo>/.integration`, salida completa en `.integration.log`), y
+  la base solo avanza, por fast-forward, a un commit que pasó. Mientras corren los tests no cambia nada en `main`
+  ni en la carpeta de la zona. Los merges de un repositorio van de a uno. Los tests corren desde otra carpeta, así
+  que lo que dependa del nombre de la carpeta hay que fijarlo (en `docker compose`, un `name:` al inicio del
+  archivo; entonces un test que corra `up` desde ahí también actúa sobre el proyecto real). Lo que git ignora
+  (dependencias, cachés) queda ahí entre merges, así que instálalas ahí una vez o en el comando de tests
+  (`PRAMA_WORKTREE_LINK` no aplica: una carpeta enlazada puede apuntar al código de antes del merge). El resto se
+  borra, y un proceso que los tests dejen corriendo se termina, salvo que se desprenda por su cuenta.
 - Solo el coordinador (o tú) integra; un ejecutor solo hace commit en su rama y se pone al día.
 - Los prompts de rol llevan el protocolo: los ejecutores hacen commit con evidencia y el coordinador
   reparte por archivos, integra una rama a la vez y pide a los demás ponerse al día.
@@ -413,8 +421,11 @@ prama-agent bus watch                            # eventos en vivo
 alcanza al propio equipo de quien envía (o, para un agente sin equipo, a su zona). Solo se escribe en
 agentes listos o trabajando, nunca en una shell; lo demás queda en cola (colas Maildir, seguras con
 varios consumidores) con su remitente (`[TAREA DE <sesión>]`) y el watchdog lo entrega cuando el
-agente está listo. Los caracteres de control nunca se teclean. Un bloqueo por límite de uso se
-reintenta tras `PRAMA_BLOCK_TTL` (15 min); `prama-agent send` escribe el texto tal cual, sin esas reglas. `assign` te dice que escribió la tarea;
+agente está listo. Los caracteres de control nunca se teclean. Un límite de uso con renovación conocida
+retiene al agente y su cola hasta esa hora: entonces se le dice que siga, antes de lo que estaba en cola. Sin hora
+conocida se reintenta tras `PRAMA_BLOCK_TTL` (15 min). `prama-agent send` escribe el texto tal cual, sin esas
+reglas, y se niega si el agente se detuvo y su panel es una shell (el texto se ejecutaría como comando; `--force`
+para el operador). `assign` te dice que escribió la tarea;
 agrega `--wait [segundos]` si el siguiente paso depende de eso: vuelve cuando el hook del propio CLI vio
 enviado el prompt, y da código de salida 3 si solo quedó escrita o en cola (nunca la envía de nuevo: un
 tiempo agotado no prueba que el mensaje se perdió).
@@ -551,7 +562,7 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_FLEET_MAX` / `PRAMA_FLEET_SCOPE` | `8` / `zone` | límites de la flota para los agentes |
 | `PRAMA_HOOKS` / `PRAMA_STATUSLINE` | `1` / `1` | hooks de salud / telemetría de cuota |
 | `PRAMA_QUOTA_WARN` | `90` | umbral de alerta de cuota (%) |
-| `PRAMA_WATCHDOG` | `1` | watchdog de la flota |
+| `PRAMA_WATCHDOG` | `1` | watchdog de la flota. Se reinicia solo si falla y vuelve cuando un agente termina un turno, salvo que lo hayas detenido (`fleet watchdog stop`, hasta el próximo lanzamiento) |
 | `PRAMA_SWARM_WORKERS` | `agy:2` | ejecutores por defecto de `swarm` (`auto`: elige el coordinador; `ask`: primero te propone) |
 | `PRAMA_SEND_DELAY` | `0.3` | pausa entre pegar un mensaje en un agente y presionar Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | cuánto tiempo `fleet agents` muestra bloqueada una cuenta tras un 429 (s) |
@@ -565,7 +576,8 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_FEEDBACK_MAX_OPEN` | `50` | reportes abiertos antes de pedir a los agentes que esperen |
 | `PRAMA_SWARM_ISOLATE` | `1` | equipos nuevos en una zona git: un worktree y una rama por ejecutor |
 | `PRAMA_WORKTREE_LINK` | — | directorios enlazados desde el checkout principal en cada worktree (`node_modules .venv`) |
-| `PRAMA_MERGE_TEST` | — | comando de tests tras cada `worktree merge` (si falla, se deshace el merge) |
+| `PRAMA_MERGE_TEST` | — | comando de tests que cada `worktree merge` debe pasar antes de integrar |
+| `PRAMA_MERGE_TEST_TIMEOUT` | `1800` | segundos para esos tests; pasado eso, el merge no se integra |
 | `PRAMA_LANG` | `auto` | idioma: `es`, `en`, `auto` (según el locale); `prama-agent lang` |
 | `PRAMA_THEME` | `midnight` | tema de color; `prama-agent theme` los lista |
 | `PRAMA_TUI_MOUSE` | `1` | mouse y toques en el menú |
