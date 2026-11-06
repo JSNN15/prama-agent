@@ -7,7 +7,8 @@
 # worktree on branch prama/<team>/<name>, created from the branch the zone's checkout is on (BASE,
 # stored on the coordinator). The coordinator stays in the zone's directory on BASE and integrates:
 #   worktree status   ahead/behind BASE, uncommitted files, last commit of every worker branch
-#   worktree merge    merges a worker branch into BASE (aborts on conflict: BASE never stays broken)
+#   worktree merge    merges a worker branch into BASE, one at a time per repository (aborts on
+#                     conflict; with tests, BASE only ever receives a merge that passed them)
 #   worktree sync     merges BASE into a worker branch (keeps it current after other merges)
 #   worktree clean    removes worktrees that are clean and fully merged (also on swarm stop)
 # Unmerged or uncommitted work is never deleted.
@@ -188,6 +189,86 @@ _wt_worker() {
 
 # worktree merge <worker session> [--keep-conflicts] — merges its branch into the team's base,
 # in the zone's checkout. The checkout must be clean and on the base branch.
+# _wt_common_dir <checkout> → the repository's git directory, the same from any of its worktrees
+_wt_common_dir() { ( cd "$1" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P ); }
+
+# _wt_merge_lock <checkout> — merges into a repository run one at a time, tests included: two at once
+# test and land over each other. It is held until this process ends or closes WT_LOCK; what it starts
+# for a long time (the tests, a tmux server) must not inherit it.
+_wt_merge_lock() {
+  local common
+  command -v flock >/dev/null 2>&1 || return 0
+  common=$(_wt_common_dir "$1")
+  [ -n "$common" ] || die "$(_t 'Could not read the current commit of %s.' "$1")"
+  exec {WT_LOCK}>"$common/prama-merge.lock" || die "$(_t 'Could not lock the merges of %s.' "$1")"
+  flock -n "$WT_LOCK" && return 0
+  info_msg "$(_t 'Another merge is running in this repository: waiting for it.')"
+  flock -w $(( ${PRAMA_MERGE_TEST_TIMEOUT:-1800} + 120 )) "$WT_LOCK" \
+    || die "$(_t 'Another merge of %s did not finish in time: nothing was merged.' "$1")"
+}
+
+# _wt_integration <checkout> <commit> → WT_IT: the repository's integration worktree, at <commit>.
+# It stays between merges: what the tests need and git ignores (node_modules, .venv, caches) is there
+# for the next one. Everything else goes, because an old file can stop a merge or pass a test.
+_wt_integration() {
+  local dir=$1 at=$2 f
+  WT_IT="${PRAMA_WORKTREE_ROOT:-$(dirname "$dir")/.prama-worktrees}/$(basename "$dir")/.integration"
+  if [ "$(_wt_common_dir "$WT_IT")" != "$(_wt_common_dir "$dir")" ]; then
+    [ ! -e "$WT_IT" ] || { warn "$(_t '%s exists and is not a worktree of this repository.' "$WT_IT")"; return 1; }
+    git -C "$dir" worktree prune >/dev/null 2>&1
+    mkdir -p "$(dirname "$WT_IT")" || return 1
+    git -C "$dir" worktree add -q --detach "$WT_IT" "$at" >/dev/null 2>&1 || return 1
+  fi
+  git -C "$WT_IT" merge --abort >/dev/null 2>&1
+  git -C "$WT_IT" checkout -q --force --detach "$at" >/dev/null 2>&1 || return 1
+  git -C "$WT_IT" reset -q --hard "$at" >/dev/null 2>&1 || return 1
+  git -C "$WT_IT" clean -fdq >/dev/null 2>&1 || return 1
+  for f in ${PRAMA_WORKTREE_LINK:-}; do
+    [[ $f == */* || $f == .. || $f == . ]] && continue
+    [ -d "$dir/$f" ] && [ ! -e "$WT_IT/$f" ] && ln -s "$dir/$f" "$WT_IT/$f"
+  done
+  for f in $PRAMA_WORKTREE_COPY_FILES; do
+    if [ -f "$dir/$f" ]; then cp -p "$dir/$f" "$WT_IT/$f" && chmod 600 "$WT_IT/$f" 2>/dev/null; fi
+  done
+  return 0
+}
+
+# _wt_run_bounded <dir> <log> <command> → its exit code. At most PRAMA_MERGE_TEST_TIMEOUT seconds, and
+# nothing it started in the background outlives it (it would write into the next merge's tree, and hold
+# the log open). `timeout` leads its own process group, so the whole group can be ended.
+_wt_run_bounded() {
+  local dir=$1 log=$2 cmd=$3 pid rc=0
+  (
+    [ -z "${WT_LOCK:-}" ] || exec {WT_LOCK}>&-
+    cd "$dir" && exec timeout -k 5 "${PRAMA_MERGE_TEST_TIMEOUT:-1800}" bash -c "$cmd"
+  ) >"$log" 2>&1 </dev/null &
+  pid=$!
+  # shellcheck disable=SC2064  # the pid is meant to be expanded now
+  trap "kill -TERM -- -$pid 2>/dev/null; exit 130" INT TERM
+  wait "$pid" || rc=$?
+  trap - INT TERM
+  kill -KILL -- "-$pid" 2>/dev/null
+  return "$rc"
+}
+
+# _wt_merge_test <checkout> <base> <test> — tests the merge waiting in WT_IT and lands it: the base and
+# its checkout only move, by fast-forward, to a commit that passed. A failure leaves them as they were
+# and the worktree as the tests left it, to look at.
+_wt_merge_test() {
+  local dir=$1 base=$2 test=$3 log="$WT_IT.log" rc=0 tip out
+  info_msg "$(_t 'Running the tests: %s' "$test")"
+  _wt_run_bounded "$WT_IT" "$log" "$test" || rc=$?
+  if (( rc )); then
+    bus_event conflict "${PRAMA_SESSION:-operator}" "$WT_W" "tests failed on a merge of $WT_WB (rc=$rc)"
+    tail -n 25 "$log" >&2
+    die "$(_t 'The tests failed on the merge of %s (code %d): %s did not change. Send the failure to %s. Full output: %s' "$WT_WB" "$rc" "$base" "$WT_W" "$log")"
+  fi
+  ok "$(_t 'Tests passed.')"
+  tip=$(git -C "$WT_IT" rev-parse HEAD)
+  out=$(git -C "$dir" merge -q --ff-only "$tip" 2>&1) \
+    || die "$(_t 'The tests passed, but %s could not move to the result (did it change while they ran?): nothing landed, merge again. %s' "$base" "${out:0:200}")"
+}
+
 wt_merge() {
   local s='' keep=0 dir base cur out conflicts test=${PRAMA_MERGE_TEST:-} mode=${PRAMA_MERGE_MODE:-local}
   while (( $# )); do
@@ -209,11 +290,14 @@ wt_merge() {
   dir=$(zone_dir "$(state_get "$WT_COORD" ZONE)")
   base=$(team_base "$WT_COORD")
   if [ "$mode" = pr ]; then _wt_merge_pr "$base"; return; fi
+  _wt_merge_lock "$dir"
   cur=$(git -C "$dir" symbolic-ref --short -q HEAD)
   [ "$cur" = "$base" ] || die "$(_t "The zone's checkout is on '%s', not on the team's base '%s': switch it first (git -C %s switch %s)." "$cur" "$base" "$dir" "$base")"
   [ -z "$(git -C "$dir" status --porcelain --untracked-files=no)" ] \
     || die "$(_t 'The checkout of %s has uncommitted changes: commit or stash them before merging.' "$dir")"
-  local dirty pre
+  ! git -C "$dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 \
+    || die "$(_t 'A merge is in progress in %s: finish it (git commit) or abort it (git merge --abort) first.' "$dir")"
+  local dirty pre tree=$dir
   dirty=$(_wt_dirty "$WT_WD")
   (( dirty > 0 )) && warn "$(_t '%s has %d uncommitted file(s); only its commits are merged.' "$WT_W" "$dirty")"
   if [ -z "$(git -C "$dir" rev-list "$base..$WT_WB" 2>/dev/null)" ]; then
@@ -221,35 +305,29 @@ wt_merge() {
   fi
   _wt_ident "$dir"
   pre=$(git -C "$dir" rev-parse HEAD) || die "$(_t 'Could not read the current commit of %s.' "$dir")"
-  if out=$(git -C "$dir" "${WT_ID[@]}" merge --no-ff --no-edit -m "Merge $WT_WB (prama: $WT_W)" "$WT_WB" 2>&1); then
-    # Tests between merges: a merge that breaks them is undone, so the base stays green.
-    if [ -n "$test" ]; then
-      info_msg "$(_t 'Running the tests: %s' "$test")"
-      local tlog rc=0
-      tlog=$( cd "$dir" && timeout "${PRAMA_MERGE_TEST_TIMEOUT:-1800}" bash -c "$test" 2>&1 ) || rc=$?
-      if (( rc )); then
-        # Back to the commit from before the merge. The checkout was clean, so a hard reset only
-        # drops the merge and what the tests wrote to tracked files; it is checked, not assumed.
-        git -C "$dir" reset -q --hard "$pre" >/dev/null 2>&1
-        bus_event conflict "${PRAMA_SESSION:-operator}" "$WT_W" "tests failed after merging $WT_WB (rc=$rc)"
-        printf '%s\n' "$tlog" | tail -n 25 >&2
-        [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$pre" ] \
-          || die "$(_t 'The tests failed after merging %s and the merge could NOT be undone: %s is not at %s any more. Fix it by hand: git -C %s reset --hard %s' "$WT_WB" "$base" "${pre:0:12}" "$dir" "${pre:0:12}")"
-        die "$(_t 'The tests failed after merging %s (code %d): the merge was undone, %s is unchanged. Send the failure to %s.' "$WT_WB" "$rc" "$base" "$WT_W")"
-      fi
-      ok "$(_t 'Tests passed.')"
-    fi
-    bus_event merged "${PRAMA_SESSION:-operator}" "$WT_W" "$WT_WB → $base"
+  # With tests, the merge is made and tried apart from the base's checkout.
+  if [ -n "$test" ]; then
+    _wt_integration "$dir" "$pre" || die "$(_t 'Could not prepare the integration worktree of %s.' "$dir")"
+    tree=$WT_IT
+  fi
+  if out=$(git -C "$tree" "${WT_ID[@]}" merge --no-ff --no-edit -m "Merge $WT_WB (prama: $WT_W)" "$WT_WB" 2>&1); then
+    [ -z "$test" ] || _wt_merge_test "$dir" "$base" "$test"
+    bus_event merged "${PRAMA_SESSION:-operator}" "$WT_W" "$WT_WB → $base${test:+ (tested)}"
     ok "$(_t 'Merged %s into %s.' "$WT_WB" "$base")"
+    [ -z "${WT_LOCK:-}" ] || exec {WT_LOCK}>&-
     _wt_others_behind "$WT_COORD" "$WT_W"
     return 0
   fi
-  conflicts=$(git -C "$dir" diff --name-only --diff-filter=U 2>/dev/null | paste -sd' ')
+  conflicts=$(git -C "$tree" diff --name-only --diff-filter=U 2>/dev/null | paste -sd' ')
   if [ -n "$conflicts" ] && (( keep )); then
+    if [ "$tree" != "$dir" ]; then
+      git -C "$tree" merge --abort >/dev/null 2>&1 || true
+      git -C "$dir" "${WT_ID[@]}" merge --no-ff --no-edit -m "Merge $WT_WB (prama: $WT_W)" "$WT_WB" >/dev/null 2>&1 || true
+    fi
     warn "$(_t 'Conflicts left in %s for you to resolve (then git commit): %s' "$dir" "$conflicts")"
     return 1
   fi
-  git -C "$dir" merge --abort >/dev/null 2>&1 || true
+  git -C "$tree" merge --abort >/dev/null 2>&1 || true
   bus_event conflict "${PRAMA_SESSION:-operator}" "$WT_W" "$WT_WB → $base: $conflicts"
   die "$(_t 'Merge of %s aborted, %s is unchanged. Conflicts: %s. Ask %s to run prama-agent worktree sync (merges %s into its branch), resolve them and commit; then merge again.' "$WT_WB" "$base" "${conflicts:-${out:0:200}}" "$WT_W" "$base")"
 }
@@ -308,6 +386,11 @@ wt_sync() {
     die "$(_t "Only %s itself or its coordinator can sync its branch." "$WT_W")"
   fi
   base=$(team_base "$WT_COORD")
+  # A merge already open holds resolutions nobody has committed: running another would lose them.
+  if git -C "$WT_WD" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+    (( self )) && die "$(_t 'A merge is already in progress in your worktree: resolve what is left and finish it with git commit. Nothing was touched.')"
+    die "$(_t '%s has a merge in progress: it has to finish it first.' "$WT_W")"
+  fi
   if (( ! self )) && [ -n "$(git -C "$WT_WD" status --porcelain --untracked-files=no)" ]; then
     die "$(_t '%s has uncommitted changes: ask it to commit and run prama-agent worktree sync itself.' "$WT_W")"
   fi

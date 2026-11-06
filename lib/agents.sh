@@ -532,9 +532,12 @@ launch_agent() {
   fi
   # `restore`: the same conversation. claude only has one to resume once it got a message; before
   # that it starts fresh with the same id.
-  local resume=0
-  if [ -n "${RESTORE_SID:-}" ]; then
-    sid=$RESTORE_SID
+  # It names the session it is for, and is not passed on: it starts the server if there is none, and
+  # tmux would hand it to every pane (a later agent would take over this conversation).
+  local resume=0 restore_sid=${RESTORE_SID:-} restore_for=${RESTORE_FOR:-}
+  unset RESTORE_SID RESTORE_FOR
+  if [ -n "$restore_sid" ] && [ "$restore_for" = "$name" ]; then
+    sid=$restore_sid
     if [ "$agent" != claude ] || claude_conversation_exists "$sid"; then resume=1; fi
   fi
   AGENT_SID=$sid AGENT_RESUME=$resume PROFILE=$profile \

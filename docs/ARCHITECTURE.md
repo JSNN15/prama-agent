@@ -88,9 +88,12 @@ creates private dirs).
     Strings are translated when used, never at source time (the language is known after config.env).
 17. **Memory is data, scoped like teams.** Notes are single redacted lines in private files, never
     sourced; an agent writes only to its own team's (or zone's) memory and cannot clear one.
-18. **The base branch of an isolated team never stays broken.** `worktree merge` needs a clean base
-    checkout, aborts on conflict and undoes a merge whose `--test` fails; only the team's coordinator
-    or the operator merges. Cleaning never deletes unmerged or uncommitted work.
+18. **The base branch only receives what passed.** `worktree merge` runs one at a time per repository
+    (a lock in its git directory), needs a clean base checkout and aborts on conflict. With `--test` the
+    merge is made and tried in the repository's integration worktree, and the base moves by fast-forward
+    only after it passes: tests never run in the base's checkout, which is the folder live services may
+    mount. Only the team's coordinator or the operator merges. Cleaning never deletes unmerged or
+    uncommitted work.
 19. **The plan is append-only history plus a snapshot.** `tasks` is rewritten under `flock`, `log`
     only grows, revisions only increase; what an agent claims (status, progress) is shown next to what
     is observed (activity, evidence), never instead of it.

@@ -241,6 +241,13 @@ tmx_running() { tmx list-sessions >/dev/null 2>&1; }
 
 # Exact-match targets: plain "-t name" in tmux does prefix/pattern matching.
 tmx_has()  { tmx has-session -t "=$1" 2>/dev/null; }
+# tmx_gone <session> → 0 only when tmux answered that it is not there. A call that failed for any
+# other reason says nothing about the session, and what follows "gone" is deleting its state.
+tmx_gone() {
+  local out
+  out=$(tmx has-session -t "=$1" 2>&1) && return 1
+  [[ "$out" == *"can't find session"* || "$out" == *"session not found"* || "$out" == *"no server running"* ]]
+}
 # Closes a session and everything running in it. Killing the tmux session alone only sends
 # SIGHUP, which some agent CLIs (agy) ignore once they lose the tty: the agent would survive,
 # orphaned, with the supervisor blocked waiting for it. So each pane's process group gets TERM
@@ -628,6 +635,8 @@ set-environment -gu PRAMA_ROLE
 set-environment -gu PRAMA_WT_BRANCH
 set-environment -gu PRAMA_WT_DIR
 set-environment -gu PRAMA_SL_CACHE
+set-environment -gu RESTORE_SID
+set-environment -gu RESTORE_FOR
 set-environment -gu IS_SANDBOX
 # A server started from inside a Claude Code session must not pass its identity on: claude refuses to
 # start under CLAUDECODE, and the others are that session's own.
@@ -804,7 +813,7 @@ state_gc() {
   for f in "$PRAMA_BUS_DIR"/state/*.env; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .env)
-    tmx_has "$s" || state_remove "$s"
+    tmx_gone "$s" && state_remove "$s"
   done
 }
 
@@ -1136,14 +1145,36 @@ strip_ansi_stream() { sed -E 's/\x1b\[[0-9;?]*[ -\/]*[@-~]//g; s/\x1b\][^\x07]*\
 # session_block_info <session> [snippet] → "reason|detail"; returns 1 when the agent is not blocked.
 # Hook-reported health (deterministic) wins; the screen is the fallback for dialogs that appear
 # before hooks run (login, trust, model picker) and for CLIs without hooks.
-# _hook_block_info <session> → "reason|detail" while the CLI's hooks report it blocked. Transient
-# failures (quota windows, overload, server errors) expire after PRAMA_BLOCK_TTL: the next prompt
-# either works or fails again and re-reports. Auth/credit/model need a human or a change.
+# _limit_reset_at <session> <blocked at> <now> → when the usage window behind a limit block resets:
+# the latest one still to come of the windows at 100 % (its own numbers and its account's), else one
+# that has reset since the block. Fails when no window explains it.
+_limit_reset_at() {
+  local s=$1 ts=$2 now=$3 f win pct at soon=0 past=0
+  for f in "$(quota_file "$s")" "$(account_quota_file "$(state_get "$s" AGENT)" "$(state_get "$s" PROFILE default)")"; do
+    for win in 5H 7D; do
+      pct=$(_kv_get "$f" "Q_$win") at=$(_kv_get "$f" "Q_${win}_RESET")
+      [[ "$pct" =~ ^[0-9]+$ && "$at" =~ ^[0-9]+$ ]] && (( pct >= 100 )) || continue
+      if (( at > now )); then (( at > soon )) && soon=$at
+      elif (( at > ts && at > past )); then past=$at; fi
+    done
+  done
+  if (( soon )); then printf '%s' "$soon"; elif (( past )); then printf '%s' "$past"; else return 1; fi
+}
+
+# _hook_block_info <session> → "reason|detail" while the CLI's hooks report it blocked. A limit whose
+# window is known holds until that window resets: a prompt before then only fails again. Other
+# transient failures (a limit with no known reset, overload, server errors) expire after
+# PRAMA_BLOCK_TTL: the next prompt either works or fails again and re-reports. Auth/credit/model need a
+# human or a change.
 _hook_block_info() {
-  local s=$1 reason ts
+  local s=$1 reason ts now until
   [ "$(health_get "$s" HEALTH)" = blocked ] || return 1
   reason=$(health_get "$s" REASON error) ts=$(health_get "$s" TS 0)
-  if [[ "$reason" =~ ^(limit|error)$ ]] && (( ${EPOCHSECONDS:-$(date +%s)} - ts > ${PRAMA_BLOCK_TTL:-900} )); then
+  [[ "$ts" =~ ^[0-9]+$ ]] || ts=0
+  now=${EPOCHSECONDS:-$(date +%s)}
+  if [ "$reason" = limit ] && until=$(_limit_reset_at "$s" "$ts" "$now"); then
+    (( until > now )) || return 1
+  elif [[ "$reason" =~ ^(limit|error)$ ]] && (( now - ts > ${PRAMA_BLOCK_TTL:-900} )); then
     return 1
   fi
   printf '%s|%s' "$reason" "$(health_get "$s" DETAIL)"

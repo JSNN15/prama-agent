@@ -116,13 +116,19 @@ created from the branch the zone is on; the coordinator stays on that branch and
 ```bash
 prama-agent swarm backend --team sec --workers agy:2        # isolated (default; --shared to opt out)
 prama-agent worktree status backend --team sec              # each branch: to merge, uncommitted, behind
-prama-agent worktree merge prama-backend-sec-agy --test "pytest -q"   # merge; undone if the tests fail
+prama-agent worktree merge prama-backend-sec-agy --test "pytest -q"   # lands only if the tests pass
 prama-agent worktree sync prama-backend-sec-agy-2           # bring a branch up to date with the base
 ```
 
 - `merge` refuses a dirty base checkout, and **aborts on conflict**: the base never stays broken; the
   executor runs `worktree sync`, resolves in its own worktree, commits, and the coordinator merges again.
-  With `--test` (or `PRAMA_MERGE_TEST`) a merge that breaks the tests is undone.
+  With `--test` (or `PRAMA_MERGE_TEST`) the merge is made and tested apart, in the repository's integration
+  worktree (`.prama-worktrees/<repo>/.integration`, full output in `.integration.log`), and the base only moves,
+  by fast-forward, to a commit that passed. While the tests run nothing changes in `main` or in the zone's
+  folder. Merges into a repository run one at a time. Tests run from another folder, so anything that
+  depends on the folder's name has to be set explicitly (for `docker compose`, a `name:` at the top of the
+  file). What git ignores (dependencies, caches) stays there between merges; anything else is removed, and
+  a process the tests leave behind is ended, so make them start what they need.
 - Only the coordinator (or you) merges; an executor only commits to its branch and syncs itself.
 - Role prompts carry the protocol: executors commit with evidence, coordinators split work by files,
   merge one branch at a time and ask the others to sync.
@@ -403,8 +409,11 @@ prama-agent bus watch                            # live events
 sender's own team (or, for an agent outside teams, its zone). Text is only typed into agents that are
 ready or working, never into a plain shell; anything else is queued (Maildir queues, multi-consumer
 safe) with its sender (`[TASK FROM <session>]`), and the watchdog delivers it once the agent is ready.
-Control characters are never typed. A usage-limit block is retried after `PRAMA_BLOCK_TTL` (15 min);
-`prama-agent send` types the text as is, without those rules. `assign` tells you it typed the task;
+Control characters are never typed. A usage limit whose reset is known holds the agent and its queue until
+that reset: then it is told to carry on, ahead of what was queued. Without a known reset it is retried after
+`PRAMA_BLOCK_TTL` (15 min). `prama-agent send` types the text as is, without those rules, and refuses when the
+agent stopped and its pane is a shell (the text would run as a command; `--force` for the operator).
+`assign` tells you it typed the task;
 add `--wait [seconds]` when the next step depends on it: it returns once the CLI's own hook saw the prompt
 submitted, and exit code 3 when it was only typed or queued (it never sends again: a timeout does not prove
 the message was lost).
@@ -547,7 +556,8 @@ the menu, the tmux status bar of every agent and the fzf inspector. Both are als
 | `PRAMA_FEEDBACK_MAX_OPEN` | `50` | open bug reports before agents are asked to wait |
 | `PRAMA_SWARM_ISOLATE` | `1` | new teams in a git zone: a worktree and branch per executor |
 | `PRAMA_WORKTREE_LINK` | — | directories symlinked from the main checkout into each worktree (`node_modules .venv`) |
-| `PRAMA_MERGE_TEST` | — | test command run after every `worktree merge` (the merge is undone if it fails) |
+| `PRAMA_MERGE_TEST` | — | test command every `worktree merge` has to pass before it lands |
+| `PRAMA_MERGE_TEST_TIMEOUT` | `1800` | seconds those tests get; past that the merge does not land |
 | `PRAMA_LANG` | `auto` | interface language: `en`, `es`, `auto` (from the locale); `prama-agent lang` |
 | `PRAMA_THEME` | `midnight` | color theme; `prama-agent theme` lists them |
 | `PRAMA_TUI_MOUSE` | `1` | mouse and touch in the menu |

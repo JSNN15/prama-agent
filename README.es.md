@@ -26,7 +26,7 @@ diriges la flota desde la terminal, la CLI o Telegram.
 | El agente dice… | prama-agent verifica |
 | --- | --- |
 | "Listo." | `plan verify` corre la verificación de aceptación de la tarea en la rama del propio agente y registra el código de salida y el commit. Si falla, la tarea se reabre. *Lista* sin evidencia queda **sin verificar**. |
-| "Listo para merge." | Cada agente trabaja en su propio worktree y rama de git. `worktree merge --test` aborta ante conflictos y deshace un merge que rompe los tests: `main` sigue en verde. |
+| "Listo para merge." | Cada agente trabaja en su propio worktree y rama de git. `worktree merge --test` prueba cada merge aparte, de a uno, y `main` solo recibe lo que pasó. |
 | "Estoy en eso." | Los hooks del propio CLI informan cuando un agente está **bloqueado** y por qué (login, crédito, límite de uso, confianza en la carpeta, modelo). Una tarea sin actividad en la terminal durante 20 minutos queda **estancada**. |
 | Nada (está trabado). | Nunca se escribe en un agente bloqueado: su trabajo queda en cola y se entrega cuando está listo. La alerta llega a tu celular con botones para mirar, hablarle o reiniciarlo. |
 | "Me sobra cuota." | Uso de las ventanas de 5 horas y semanal, leído de la statusline de cada CLI, con alerta al 90 %. |

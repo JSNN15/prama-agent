@@ -33,7 +33,8 @@ The e2e suite builds its own tmux socket (`prama-test-$$`), `HOME`, state dir an
   config in `/etc/prama-agent/config.env` (YOLO + remote by choice). Never run `tmux -L prama`,
   `prama-agent` with the default env, or edit `/etc/prama-agent` / `~/.gemini` / `~/.claude` while
   testing. For manual experiments export your own `HOME`, `PRAMA_STATE_HOME` and
-  `PRAMA_TMUX_SOCKET` (a scratch dir and a unique socket name) and kill that server afterwards.
+  `PRAMA_TMUX_SOCKET` (a scratch dir and a unique socket name), plus `PRAMA_SYSTEM_CONFIG_DIR=` (empty, or
+  `/etc/prama-agent` still loads the real zones and repos), and kill that server afterwards.
 
 ## Repo workflow
 

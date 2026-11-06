@@ -276,6 +276,8 @@ EOF
 subcmd_bus() {
   local action=${1:-status}
   (( $# )) && shift
+  # `bus report --help` is a question, not a report to deliver.
+  if (( $# == 1 )) && [[ "$1" == -h || "$1" == --help ]]; then _bus_usage; return 0; fi
   case "$action" in
     status|ls)            _bus_status "$@" ;;
     assign|send)          _bus_assign "$@" ;;
