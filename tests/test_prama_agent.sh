@@ -1395,6 +1395,34 @@ assert_true "PRAMA_MERGE_TEST_TIMEOUT is honoured" "[ $rc -ne 0 ] && [ $(( SECON
 t0=$SECONDS; out=$(lwmerge "$LX" --test 'sleep 31337 & true'); rc=$?
 assert_true "A process the tests leave behind does not delay the merge" "[ $rc -eq 0 ] && [ $(( SECONDS - t0 )) -lt 10 ] && [ -f '$LW/d.txt' ]"
 assert_true "…and does not outlive it" "! pgrep -f '[s]leep 31337' >/dev/null"
+echo t1 > "$LWT/prama-m-claude/t1.txt"; gitc "$LWT/prama-m-claude" add t1.txt; gitc "$LWT/prama-m-claude" commit -qm "x: t1"
+pre=$(git -C "$LW" rev-parse HEAD)
+out=$(lwmerge "$LX" --test "git checkout -q HEAD~1"); rc=$?
+assert_true "Tests that move the worktree's commit land nothing" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ]"
+out=$(lwmerge "$LX" --test "git -c user.email=t@t -c user.name=t commit --allow-empty -qm from-test"); rc=$?
+assert_true "…nor do tests that commit" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ]"
+out=$(lwmerge "$LX" --test "git -C '$LW' switch -q -c other-branch"); rc=$?
+assert_true "If the checkout changes branch during the tests, nothing lands anywhere" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' rev-parse HEAD)\" = $pre ] && [ ! -f '$LW/t1.txt' ]"
+git -C "$LW" switch -q main; git -C "$LW" branch -qD other-branch
+echo stray > "$LW/t1.txt"
+t0=$SECONDS; out=$(lwmerge "$LX" --test "sleep 20"); rc=$?
+assert_true "An untracked file in the way stops it before spending the tests" "[ $rc -ne 0 ] && [ $(( SECONDS - t0 )) -lt 10 ] && [ \"\$(cat '$LW/t1.txt')\" = stray ]"
+out=$(lwmerge "$LX" --keep-conflicts); rc=$?
+assert_true "…and is not reported as conflicts left to resolve" "[ $rc -ne 0 ] && ! git -C '$LW' rev-parse -q --verify MERGE_HEAD >/dev/null"
+rm -f "$LW/t1.txt"
+mkdir -p "$LW/.git/hooks"; printf '#!/bin/sh\nnohup sleep 31338 >/dev/null 2>&1 &\n' > "$LW/.git/hooks/post-merge"; chmod +x "$LW/.git/hooks/post-merge"
+out=$(lwmerge "$LX" --test true); rc=$?
+assert_true "A merge with a hook that leaves a daemon behind lands" "[ $rc -eq 0 ] && [ -f '$LW/t1.txt' ]"
+rm -f "$LW/.git/hooks/post-merge"
+echo t2 > "$LWT/prama-m-claude/t2.txt"; gitc "$LWT/prama-m-claude" add t2.txt; gitc "$LWT/prama-m-claude" commit -qm "x: t2"
+t0=$SECONDS; out=$(PRAMA_MERGE_TEST_TIMEOUT=5 lwmerge "$LX" --test true); rc=$?
+assert_true "…and that daemon does not hold the next merge's lock" "[ $rc -eq 0 ] && [ $(( SECONDS - t0 )) -lt 20 ]"
+kill "$(pgrep -f '[s]leep 31338')" 2>/dev/null
+echo y2 > "$LWT/prama-m-agy/y2.txt"; gitc "$LWT/prama-m-agy" add y2.txt; gitc "$LWT/prama-m-agy" commit -qm "y: y2"
+mkdir -p "$LW/.integration-decoy/lw/.integration"
+out=$(PRAMA_WORKTREE_ROOT="$LW/.integration-decoy" lwmerge "$LY" --test true); rc=$?
+assert_true "A plain folder in the integration worktree's place inside the repository is refused" "[ $rc -ne 0 ] && [ \"\$(git -C '$LW' symbolic-ref --short HEAD)\" = main ]"
+rm -rf "$LW/.integration-decoy"
 echo x1 > "$LWT/prama-m-claude/app.txt"; gitc "$LWT/prama-m-claude" commit -qam "x: conflict"
 echo y1 > "$LWT/prama-m-agy/app.txt"; gitc "$LWT/prama-m-agy" commit -qam "y: conflict"
 out=$(lwmerge "$LX" --test true); rc=$?
@@ -1415,6 +1443,18 @@ assert_true "Syncing again does not throw away a resolution not yet committed" "
 out=$(PRAMA_SESSION=$LC "$BIN" worktree sync "$LY" 2>&1); rc=$?
 assert_true "…nor does the coordinator's sync" "[ $rc -ne 0 ] && git -C '$LWT/prama-m-agy' rev-parse -q --verify MERGE_HEAD >/dev/null"
 "$BIN" stop --all -y >/dev/null 2>&1
+
+SUB="$TMP_ROOT/repos/subz"; mkdir -p "$SUB/pkg"; git -C "$SUB" init -q -b main
+echo base > "$SUB/pkg/app.txt"; gitc "$SUB" add pkg; gitc "$SUB" commit -qm init
+"$BIN" zones add subz "$SUB/pkg" >/dev/null 2>&1
+"$BIN" swarm subz --team s --workers claude:1 --no-open >/dev/null 2>&1
+SW=$(sed -n 's/^TARGET_DIR=//p' "$STATE/bus/state/tp-subz-s-claude.env")
+if [ -n "$SW" ] && [ -d "$SW" ]; then
+  echo two > "$SW/pkg/app2.txt"; gitc "$SW" add pkg; gitc "$SW" commit -qm two
+  out=$(PRAMA_SESSION=tp-subz-s-coord "$BIN" worktree merge tp-subz-s-claude --test "pwd > '$TMP_ROOT/subdir.txt'; test -f app2.txt" 2>&1); rc=$?
+  assert_true "A zone in a subfolder tests from that subfolder" "[ $rc -eq 0 ] && [[ \"\$(cat '$TMP_ROOT/subdir.txt')\" == */pkg ]]"
+fi
+"$BIN" stop --all -y >/dev/null 2>&1; "$BIN" zones remove subz >/dev/null 2>&1
 
 section "Conversations, limits and messages stay where they belong"
 mock_ctl tp-rv interactive; "$BIN" claude alpha --bg --name tp-rv >/dev/null
@@ -1456,6 +1496,24 @@ assert_true "…in that order" "[[ \"\$(head -n 1 <<< \"\$got\")\" == '[PRAMA]'*
 printf 'HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n' "$(( now - 2000 ))" > "$STATE/bus/state/tp-qh.health"
 printf 'Q_TS=%s\nQ_5H=40\nQ_5H_RESET=%s\n' "$now" "$(( now + 14400 ))" > "$STATE/bus/state/tp-qh.quota"
 assert_eq "A limit no window explains still expires with its TTL" "READY" "$(st tp-qh .state)"
+printf 'HEALTH=blocked\nREASON=limit\nDETAIL=429\nTS=%s\n' "$now" > "$STATE/bus/state/tp-qh.health"
+printf 'Q_TS=%s\nQ_5H=40\nQ_5H_RESET=%s\n' "$now" "$(( now + 14400 ))" > "$STATE/bus/state/tp-qh.quota"
+out=$(QF="$STATE/bus/state/tp-qh.quota" HF="$STATE/bus/state/tp-qh.health" bash -c "$LIBS"'
+  declare -gA W_PREV=() W_READY=() W_QGROUP=() W_QALERTED=() W_WAIT=() W_ATTN=()
+  watchdog_tick >/dev/null 2>&1; printf "first:%s\n" "$(state_get tp-qh LIMIT_UNTIL)"
+  printf "Q_TS=%s\nQ_5H=100\nQ_5H_RESET=%s\n" "$(date +%s)" "$(( $(date +%s) + 14400 ))" > "$QF"
+  watchdog_tick >/dev/null 2>&1; printf "later:%s\n" "$(state_get tp-qh LIMIT_UNTIL)"
+  rm -f "$HF"
+  watchdog_tick >/dev/null 2>&1
+  printf "restart:%s:%s:%s\n" "$(bus_session_state tp-qh)" "$(state_get tp-qh LIMIT_UNTIL)" "$(queue_len tp-qh)"
+  state_set tp-qh "LIMIT_UNTIL=$(( $(date +%s) - 5 ))"
+  declare -gA W_PREV=() W_READY=()
+  watchdog_tick >/dev/null 2>&1
+  printf "down:%s:%s\n" "$(state_get tp-qh LIMIT_UNTIL)" "$(queue_len tp-qh)"
+' 2>&1)
+assert_contains "A limit whose numbers arrive after the block is held too" "later:1" "$out"
+assert_contains "If it gets going before the reset (a restart), nothing says the limit reset" "restart:READY::0" "$out"
+assert_contains "A reset that passed while the watchdog was down still tells it to carry on" "down::1" "$out"
 "$BIN" stop --all -y >/dev/null 2>&1
 
 MARK="$TMP_ROOT/send-mark"

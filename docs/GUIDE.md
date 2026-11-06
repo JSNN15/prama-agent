@@ -127,8 +127,10 @@ prama-agent worktree sync prama-backend-sec-agy-2           # bring a branch up 
   by fast-forward, to a commit that passed. While the tests run nothing changes in `main` or in the zone's
   folder. Merges into a repository run one at a time. Tests run from another folder, so anything that
   depends on the folder's name has to be set explicitly (for `docker compose`, a `name:` at the top of the
-  file). What git ignores (dependencies, caches) stays there between merges; anything else is removed, and
-  a process the tests leave behind is ended, so make them start what they need.
+  file; then a test that runs `up` from there acts on the real project too). What git ignores (dependencies,
+  caches) stays there between merges, so install them there once or in the test command (`PRAMA_WORKTREE_LINK`
+  does not apply: a linked folder can point into the code from before the merge). Anything else is removed,
+  and a process the tests leave behind is ended unless it detaches itself.
 - Only the coordinator (or you) merges; an executor only commits to its branch and syncs itself.
 - Role prompts carry the protocol: executors commit with evidence, coordinators split work by files,
   merge one branch at a time and ask the others to sync.
@@ -542,7 +544,7 @@ the menu, the tmux status bar of every agent and the fzf inspector. Both are als
 | `PRAMA_FLEET_MAX` / `PRAMA_FLEET_SCOPE` | `8` / `zone` | fleet limits for agents |
 | `PRAMA_HOOKS` / `PRAMA_STATUSLINE` | `1` / `1` | health hooks / quota telemetry |
 | `PRAMA_QUOTA_WARN` | `90` | quota alert threshold (%) |
-| `PRAMA_WATCHDOG` | `1` | fleet watchdog |
+| `PRAMA_WATCHDOG` | `1` | fleet watchdog. It restarts itself if it crashes and comes back when an agent ends a turn, unless you stopped it (`fleet watchdog stop`, until the next launch) |
 | `PRAMA_SWARM_WORKERS` | `agy:2` | default workers for `swarm` (`auto`: the coordinator picks; `ask`: it proposes first) |
 | `PRAMA_SEND_DELAY` | `0.3` | pause between pasting a message into an agent and pressing Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | how long `fleet agents` reports an account blocked by a 429 (s) |

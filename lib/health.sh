@@ -307,8 +307,9 @@ watchdog_ensure() {
   watchdog_running && return 0
   ensure_tmux_conf
   local cmd
-  # It restarts itself when it crashes; a clean exit (no agents left) ends the session.
-  printf -v cmd 'while ! %q --internal-watchdog; do sleep 5; done' "$SELF_PATH"
+  # It restarts itself when it crashes. A clean exit (no agents left) ends the session, and so does not
+  # finding the program (a moved install): the session must not look alive, or nothing would replace it.
+  printf -v cmd 'while :; do %q --internal-watchdog; rc=$?; case $rc in 0|126|127) exit "$rc" ;; esac; sleep 5; done' "$SELF_PATH"
   tmx new-session -d -s "$(watchdog_session)" -x 120 -y 30 -e "PATH=$PATH" \
     ${XDG_CONFIG_HOME:+-e "XDG_CONFIG_HOME=$XDG_CONFIG_HOME"} "$cmd" 2>/dev/null || return 1
 }
@@ -343,6 +344,29 @@ _watch_alert() {
 
 _watch_log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
 
+# _watch_limit_until <session> → the known reset holding it, kept in LIMIT_UNTIL; fails when none is known.
+_watch_limit_until() {
+  local s=$1 now=${EPOCHSECONDS:-$(date +%s)} until
+  until=$(_limit_reset_at "$s" "$(health_get "$s" TS 0)" "$now") && (( until > now )) || return 1
+  [ "$(state_get "$s" LIMIT_UNTIL)" = "$until" ] || state_set "$s" "LIMIT_UNTIL=$until"
+  printf '%s' "$until"
+}
+
+# _watch_limit_over <session> <state> — the turn a limit stopped is not finished: at the reset it is told
+# to carry on, ahead of what is queued. Not if it got going some other way (a restart, a prompt): that
+# ends the hold too, whatever the time, with nothing to say.
+_watch_limit_over() {
+  local s=$1 st=$2 held prompted msg
+  held=$(state_get "$s" LIMIT_UNTIL)
+  [ -n "$held" ] || return 0
+  state_set "$s" LIMIT_UNTIL=
+  [[ "$held" =~ ^[0-9]+$ ]] && [ "$st" = READY ] && (( held <= ${EPOCHSECONDS:-$(date +%s)} )) || return 0
+  prompted=$(health_get "$s" PROMPT_TS 0)
+  [[ "$prompted" =~ ^[0-9]+$ ]] && (( prompted >= held )) && return 0
+  _tv msg '[PRAMA] Your usage limit has reset. Carry on with what you were doing.'
+  queue_push_front "$s" "$msg"
+}
+
 # One pass over the fleet. Uses the global associative arrays W_PREV and W_READY.
 watchdog_tick() {
   local s st info reason detail prev key msg rank
@@ -373,9 +397,7 @@ watchdog_tick() {
               "BLOCKED_TS=${EPOCHSECONDS:-$(date +%s)}" "BLOCKED_DETAIL=${detail//=/ }"
             # When it is known, the agent is held until then, and carries on by itself afterwards.
             local until when
-            if until=$(_limit_reset_at "$s" "$(health_get "$s" TS 0)" "${EPOCHSECONDS:-$(date +%s)}") \
-               && (( until > ${EPOCHSECONDS:-$(date +%s)} )); then
-              state_set "$s" "LIMIT_UNTIL=$until"
+            if until=$(_watch_limit_until "$s"); then
               when=$(_fmt_reset "$until")
               _tv msg 'Usage limit of %s: held until %s.' "$s" "$when"; _watch_log "$msg"
               detail+=" · ↺$when"
@@ -398,20 +420,15 @@ watchdog_tick() {
             bus_event recovered watchdog "$s" "$st"
             _tv msg "[PRAMA] '%s' recovered and is %s." "$s" "$st"
             _watch_alert "$s" "$msg"
-            # Its limit reset: the turn it stopped in is not finished. (Goes ahead of what is queued.)
-            local held; held=$(state_get "$s" LIMIT_UNTIL)
-            if [ -n "$held" ]; then
-              state_set "$s" LIMIT_UNTIL=
-              if [ "$st" = READY ]; then
-                _tv msg '[PRAMA] Your usage limit has reset. Carry on with what you were doing.'
-                queue_push_front "$s" "$msg"
-              fi
-            fi
           fi ;;
       esac
+      # Whatever the watchdog saw meanwhile, a limit that was holding this agent is settled now.
+      case $st in READY|WORKING) _watch_limit_over "$s" "$st" ;; esac
       W_PREV[$s]=$key
       W_READY[$s]=0
     fi
+    # The numbers can arrive after the block.
+    [ "$key" != BLOCKED:limit ] || _watch_limit_until "$s" >/dev/null
     if rank=$(_attention_rank "$s" "$st" "$reason"); then attn+=("$rank $s $key"); fi
 
     # A dialog only a person can answer: told once, if it stays open (agents in ask mode hit many,

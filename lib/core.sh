@@ -246,7 +246,8 @@ tmx_has()  { tmx has-session -t "=$1" 2>/dev/null; }
 tmx_gone() {
   local out
   out=$(tmx has-session -t "=$1" 2>&1) && return 1
-  [[ "$out" == *"can't find session"* || "$out" == *"session not found"* || "$out" == *"no server running"* ]]
+  [[ "$out" == *"can't find session"* || "$out" == *"session not found"* || "$out" == *"no server running"* \
+     || "$out" == *"No such file or directory"* || "$out" == *"Connection refused"* ]]
 }
 # Closes a session and everything running in it. Killing the tmux session alone only sends
 # SIGHUP, which some agent CLIs (agy) ignore once they lose the tty: the agent would survive,

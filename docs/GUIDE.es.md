@@ -131,8 +131,10 @@ prama-agent worktree sync prama-backend-seg-agy-2           # pone una rama al d
   la base solo avanza, por fast-forward, a un commit que pasó. Mientras corren los tests no cambia nada en `main`
   ni en la carpeta de la zona. Los merges de un repositorio van de a uno. Los tests corren desde otra carpeta, así
   que lo que dependa del nombre de la carpeta hay que fijarlo (en `docker compose`, un `name:` al inicio del
-  archivo). Lo que git ignora (dependencias, cachés) queda ahí entre merges; el resto se borra, y un proceso que
-  los tests dejen corriendo se termina, así que deben levantar lo que necesiten.
+  archivo; entonces un test que corra `up` desde ahí también actúa sobre el proyecto real). Lo que git ignora
+  (dependencias, cachés) queda ahí entre merges, así que instálalas ahí una vez o en el comando de tests
+  (`PRAMA_WORKTREE_LINK` no aplica: una carpeta enlazada puede apuntar al código de antes del merge). El resto se
+  borra, y un proceso que los tests dejen corriendo se termina, salvo que se desprenda por su cuenta.
 - Solo el coordinador (o tú) integra; un ejecutor solo hace commit en su rama y se pone al día.
 - Los prompts de rol llevan el protocolo: los ejecutores hacen commit con evidencia y el coordinador
   reparte por archivos, integra una rama a la vez y pide a los demás ponerse al día.
@@ -560,7 +562,7 @@ pintan el menú, la barra de tmux de cada agente y el inspector fzf. Ambos está
 | `PRAMA_FLEET_MAX` / `PRAMA_FLEET_SCOPE` | `8` / `zone` | límites de la flota para los agentes |
 | `PRAMA_HOOKS` / `PRAMA_STATUSLINE` | `1` / `1` | hooks de salud / telemetría de cuota |
 | `PRAMA_QUOTA_WARN` | `90` | umbral de alerta de cuota (%) |
-| `PRAMA_WATCHDOG` | `1` | watchdog de la flota |
+| `PRAMA_WATCHDOG` | `1` | watchdog de la flota. Se reinicia solo si falla y vuelve cuando un agente termina un turno, salvo que lo hayas detenido (`fleet watchdog stop`, hasta el próximo lanzamiento) |
 | `PRAMA_SWARM_WORKERS` | `agy:2` | ejecutores por defecto de `swarm` (`auto`: elige el coordinador; `ask`: primero te propone) |
 | `PRAMA_SEND_DELAY` | `0.3` | pausa entre pegar un mensaje en un agente y presionar Enter (s) |
 | `PRAMA_ACCOUNT_BLOCK_TTL` | `3600` | cuánto tiempo `fleet agents` muestra bloqueada una cuenta tras un 429 (s) |

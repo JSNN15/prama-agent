@@ -61,10 +61,13 @@ I18N+=(
   ['Another merge is running in this repository: waiting for it.']='Hay otro merge en curso en este repositorio: esperando a que termine.'
   ['Another merge of %s did not finish in time: nothing was merged.']='Otro merge de %s no terminó a tiempo: no se integró nada.'
   ['%s exists and is not a worktree of this repository.']='%s existe y no es un worktree de este repositorio.'
-  ['The tests failed on the merge of %s (code %d): %s did not change. Send the failure to %s. Full output: %s']='Los tests fallaron en el merge de %s (código %d): %s no cambió. Envía el fallo a %s. Salida completa: %s'
   ['The tests passed, but %s could not move to the result (did it change while they ran?): nothing landed, merge again. %s']='Los tests pasaron, pero %s no pudo avanzar al resultado (¿cambió mientras corrían?): no se integró nada, haz el merge de nuevo. %s'
   ['A merge is in progress in %s: finish it (git commit) or abort it (git merge --abort) first.']='Hay un merge en curso en %s: termínalo (git commit) o abórtalo (git merge --abort) antes.'
   ['Could not prepare the integration worktree of %s.']='No se pudo preparar el worktree de integración de %s.'
   ['A merge is already in progress in your worktree: resolve what is left and finish it with git commit. Nothing was touched.']='Ya hay un merge en curso en tu worktree: resuelve lo que falta y termínalo con git commit. No se tocó nada.'
   ['%s has a merge in progress: it has to finish it first.']='%s tiene un merge en curso: primero tiene que terminarlo.'
+  ['The result of merging %s would overwrite files in %s, so the tests were not run: %s']='El resultado de integrar %s sobrescribiría archivos en %s, así que los tests no se corrieron: %s'
+  ['The tests failed on the merge of %s (code %d): %s did not change. Full output: %s. They ran in %s: if something they need is not there (dependencies), install it there once; otherwise send the failure to %s.']='Los tests fallaron en el merge de %s (código %d): %s no cambió. Salida completa: %s. Corrieron en %s: si falta algo que necesitan (dependencias), instálalo ahí una vez; si no, envía el fallo a %s.'
+  ['The tests moved the commit of %s: nothing landed, because what they checked is not what would land.']='Los tests movieron el commit de %s: no se integró nada, porque lo que probaron no es lo que se integraría.'
+  ["The zone's checkout moved to '%s' while the tests ran: nothing landed in %s, merge again."]="El checkout de la zona pasó a '%s' mientras corrían los tests: no se integró nada en %s, haz el merge de nuevo."
 )
