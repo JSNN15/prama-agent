@@ -1528,7 +1528,8 @@ mock_ctl tp-sc interactive; "$BIN" claude alpha --bg --name tp-sc >/dev/null
 out=$(PRAMA_SESSION=tp-sc "$BIN" send tp-sb --force "touch $MARK" 2>&1); rc=$?
 sleep 0.5
 assert_true "…an agent cannot force it" "[ $rc -ne 0 ] && [ ! -e '$MARK' ]"
-out=$("$BIN" send tp-sb --force "touch $MARK" 2>&1); rc=$?
+# One harmless key: the pane is the supervisor's menu, and letters in a longer text would be its actions.
+out=$("$BIN" send tp-sb --force "x" 2>&1); rc=$?
 assert_true "…the operator can" "[ $rc -eq 0 ]"
 n=$(wc -l < "$STATE/bus/events.jsonl")
 out=$(PRAMA_SESSION=tp-sc "$BIN" bus report --help 2>&1)
