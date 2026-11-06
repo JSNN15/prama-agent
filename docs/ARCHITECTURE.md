@@ -15,7 +15,7 @@ Internal design reference for contributors (English only). User documentation:
 | `lib/roles.sh` | Role prompts, in-pane supervisor (`internal_runner`), daemon loop |
 | `lib/bus.sh` | `prama-agent bus …`: assign, report, broadcast, queues, events |
 | `lib/swarm.sh` | Teams (`swarm`), the dynamic team cockpit, in-tmux navigation (`--internal-nav`) |
-| `lib/health.sh` | CLI hooks (claude, agy) → health file, status line → quota file, `BLOCKED`/quota alerts, fleet watchdog, queued delivery |
+| `lib/health.sh` | CLI hooks (claude, agy) → health file, status line → quota file, `BLOCKED`/quota alerts, fleet watchdog, queued delivery, what needs the operator (`@prama_attention*` tmux options) |
 | `lib/fleet.sh` | `prama-agent fleet …`: spawn/kill/model/edit/restart with guard rails |
 | `lib/feedback.sh` | `prama-agent feedback …`: bug reports from agents and the operator (local, redacted, deduplicated) |
 | `lib/worktrees.sh` | Isolated teams: worker branches (`prama/<team>/<name>`), `worktree status/merge/sync/clean` |
@@ -116,6 +116,10 @@ creates private dirs).
     process still uses or a folder that changed. Closing marks the session first (`session_archive
     <s> closed` inside `tmx_kill`), so only what ended with no mark is reported as vanished.
 
+24. **Nothing an agent wrote reaches the operator's terminal raw.** `terminal_notify` writes to the
+    terminal itself, past tmux's filtering, so it takes only fixed text and session names, strips control
+    characters and cannot block its caller (`timeout`).
+
 ## core.sh API
 
 | Function | Purpose |
@@ -131,6 +135,7 @@ creates private dirs).
 | `tmx_attach <s> [exec_mode]` | Attach/switch/nested-attach correctly from anywhere |
 | `prama_sessions [include_internal]` | Session names (telegram bot / cockpits skipped by default) |
 | `is_internal_session <s>` | Bot, watchdog or cockpit |
+| `terminal_notify <text> [session]` | Bell and OSC 9 on the operator's terminals, except one already on `<session>`; 0 when one was told (invariant 24) |
 | `prama_team_order` | `session\|depth\|zone` lines: per zone, each coordinator followed by its agents (`PARENT`) |
 | `ensure_tmux_conf [force]` | Write `$PRAMA_TMUX_CONF` and reload |
 | `state_write <s> KEY=V…` / `state_get <s> KEY [def]` / `state_remove <s>` / `state_gc` | Session metadata |
@@ -140,7 +145,7 @@ creates private dirs).
 | `json_escape <s>` | Full JSON string escaping |
 | `snapshot_procs` / `resolve_pane_agent_pid <pid>` / `get_proc_metrics <pid>` | `cpu\|MB\|etime\|comm` |
 | `get_host_telemetry` | `load1\|ram_pct\|ram_used_mb` |
-| `detect_session_state <s> [dead] [cmd]` | `DEAD BOT STANDBY DAEMON WORKING BLOCKED SHELL READY` |
+| `detect_session_state <s> [dead] [cmd]` | `DEAD BOT STANDBY DAEMON BLOCKED WAITING WORKING SHELL READY` |
 | `session_block_info <s> [snippet]` / `screen_block_reason <text>` | `reason\|detail` of a BLOCKED agent (hooks first, screen fallback) |
 | `state_set <s> KEY=V…` | Merge keys into the state file (atomic, flock) |
 | `health_set` / `health_get` / `health_file` | Hook-reported health: `HEALTH REASON DETAIL ACTIVITY MODEL AGENT_SID TS` |

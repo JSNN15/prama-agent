@@ -327,6 +327,6 @@ I18N+=(
   ['❓ The coordinator proposes, you approve']='❓ El coordinador propone, tú apruebas'
   ['it tells you which agents and models it wants before launching any']='te dice qué agentes y modelos quiere antes de lanzar alguno'
   ['works for you: you talk to it, it reports to the team']='trabaja para ti: le hablas tú, reporta al equipo'
-  ['the assistant waiting for you (★)']='el asistente que te espera (★)'
+  ['what needs you, next on each press (▲ ★)']='lo que te necesita, el siguiente con cada pulsación (▲ ★)'
   ['needs you']='te necesita'
 )

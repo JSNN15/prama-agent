@@ -523,7 +523,8 @@ nav_main() {
   case "$action" in
     pick)    _nav_pick "$client" ;;
     cockpit) _nav_cockpit "$client" "$cur" ;;
-    assist)  _nav_assist "$client" ;;
+    attention) _nav_attention "$client" "$cur" ;;
+    assist)  _nav_assist "$client" "$cur" ;;
     next)    _nav_cycle "$client" "$cur" 1 ;;
     prev)    _nav_cycle "$client" "$cur" -1 ;;
     fit)     _nav_fit "$client" "$cur" ;;
@@ -531,7 +532,8 @@ nav_main() {
       case "${4:-}" in
         agents)  _nav_popup "$client" ;;
         cockpit) _nav_cockpit "$client" "$cur" ;;
-        assist)  _nav_assist "$client" ;;
+        attention) _nav_attention "$client" "$cur" ;;
+        assist)  _nav_assist "$client" "$cur" ;;
         next)    _nav_cycle "$client" "$cur" 1 ;;
         prev)    _nav_cycle "$client" "$cur" -1 ;;
         *)       tmx detach-client -c "$client" 2>/dev/null ;;
@@ -553,6 +555,54 @@ _nav_switch() {
   tmx switch-client -c "$1" -t "=$2" 2>/dev/null || return 1
   assistant_seen "$2"
   return 0
+}
+
+# _nav_goto <client> <where it is> <agent> — inside a cockpit, an agent of that cockpit gets the
+# focus: the operator keeps their team view.
+_nav_goto() {
+  local client=$1 where=$2 target=$3 pane=''
+  if _nav_is_cockpit "$where"; then
+    pane=$(tmx list-panes -t "=$where:" -F '#{@prama_view}|#{pane_id}' 2>/dev/null \
+      | awk -F'|' -v t="$target" '$1 == t { print $2; exit }')
+  fi
+  if [ -n "$pane" ]; then
+    tmx select-pane -Z -t "$pane" 2>/dev/null
+    _nav_fit "$client" "$where"
+    assistant_seen "$target"
+  else
+    _nav_switch "$client" "$target"
+  fi
+}
+
+# The key and the ▲ button: what needs the operator, most urgent first (the list the watchdog
+# publishes for the status bar), then the assistant that called; each press moves to the next one.
+# With nothing pending, the newest assistant.
+_nav_attention() {
+  local client=$1 where=$2 cur s m i n
+  local -a raw=() list=()
+  read -ra raw <<< "$(tmx show-options -gqv @prama_attention_list 2>/dev/null)"
+  s=$(tmx show-options -gqv @prama_assist 2>/dev/null)
+  [ -n "$s" ] && raw+=("$s")
+  for s in ${raw[@]+"${raw[@]}"}; do
+    tmx_has "$s" || continue
+    is_in "$s" ${list[@]+"${list[@]}"} || list+=("$s")
+  done
+  n=${#list[@]}
+  if (( ! n )); then
+    s=$(assistants_live | head -n 1)
+    if [ -n "$s" ]; then _nav_goto "$client" "$where" "$s"
+    else _tv m 'Nothing needs you right now.'; tmx display-message -c "$client" "$m" 2>/dev/null; fi
+    return 0
+  fi
+  cur=$(_nav_current_agent "$where")
+  for (( i = 0; i < n; i++ )); do [ "${list[i]}" = "$cur" ] && break; done
+  if (( n == 1 && i == 0 )); then
+    assistant_seen "$cur"
+    _tv m 'Nothing else needs you.'; tmx display-message -c "$client" "$m" 2>/dev/null
+    return 0
+  fi
+  (( i >= n )) && i=-1
+  _nav_goto "$client" "$where" "${list[$(( (i + 1) % n ))]}"
 }
 
 # ── Assistants: agents that work for the operator ──────────────────────────
@@ -579,6 +629,7 @@ assistant_announce() {
       _nav_switch "$cl" "$s"
     fi
   done < <(tmx list-clients -F '#{client_name}|#{client_termname}|#{client_activity}' 2>/dev/null)
+  terminal_notify "$msg" "$s" || true
   bus_event assistant "$by" "$s" "$(assistant_brief "$s" | head -n 1)"
   declare -F telegram_notify >/dev/null && telegram_notify "$msg" assistant "$s" >/dev/null 2>&1
   return 0
@@ -599,16 +650,16 @@ assistants_live() {
   done < <(prama_sessions) | sort -r | cut -d' ' -f2
 }
 
-# The key and the ★ button: the assistant that called, else the newest one.
+# The ★ button: the assistant that called, else the newest one.
 _nav_assist() {
-  local client=$1 s m
+  local client=$1 where=${2:-} s m
   s=$(tmx show-options -gqv @prama_assist 2>/dev/null)
   { [ -n "$s" ] && tmx_has "$s"; } || s=$(assistants_live | head -n 1)
   if [ -z "$s" ]; then
     tmx set-option -gu @prama_assist 2>/dev/null
     _tv m 'No assistant is waiting for you.'; tmx display-message -c "$client" "$m" 2>/dev/null; return 0
   fi
-  _nav_switch "$client" "$s"
+  _nav_goto "$client" "$where" "$s"
 }
 
 # Inside a cockpit, the "current" agent is the one in the focused pane.

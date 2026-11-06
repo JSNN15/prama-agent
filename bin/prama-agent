@@ -5,7 +5,7 @@
 
 set -u
 
-VERSION="6.12.0"
+VERSION="6.13.0"
 
 # Status line fast path: agy redraws it several times per second, so the last line is reused
 # for PRAMA_SL_MIN seconds with bash builtins only (no forks, before anything else runs).
@@ -171,7 +171,7 @@ ${C_BOLD}TEAMS${C_OFF}
   bus status|assign|report|inbox|broadcast|watch|clear|help            Messages between agents
   memory [show|add|clear] [<zone>|<session>] [--team T] [--zone-wide]   Team and zone memory (survives restarts)
   plan [board|timeline|add|start|done|verify|replan|log|watch|html] [<zone>|<session>] [--team T]   The team's live plan
-  Inside tmux: $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent list · $PRAMA_COCKPIT_KEY cockpit ⇄ agent · $PRAMA_ASSIST_KEY assistant waiting · Ctrl+b n/p next
+  Inside tmux: $PRAMA_MENU_KEY menu · $PRAMA_NAV_KEY agent list · $PRAMA_COCKPIT_KEY cockpit ⇄ agent · $PRAMA_ASSIST_KEY what needs you · Ctrl+b n/p next
 
 ${C_BOLD}SYSTEM${C_OFF}
   worktree list|create|remove|prune   profiles   mcp   agents [--json]
@@ -234,7 +234,7 @@ ${C_BOLD}EQUIPOS${C_OFF}
   bus status|assign|report|inbox|broadcast|watch|clear|help            Mensajes entre agentes
   memory [show|add|clear] [<zona>|<sesión>] [--team T] [--zone-wide]   Memoria del equipo y la zona (sobrevive reinicios)
   plan [board|timeline|add|start|done|verify|replan|log|watch|html] [<zona>|<sesión>] [--team T]   El plan vivo del equipo
-  Dentro de tmux: $PRAMA_MENU_KEY menú · $PRAMA_NAV_KEY lista de agentes · $PRAMA_COCKPIT_KEY cockpit ⇄ agente · $PRAMA_ASSIST_KEY asistente que te espera · Ctrl+b n/p siguiente
+  Dentro de tmux: $PRAMA_MENU_KEY menú · $PRAMA_NAV_KEY lista de agentes · $PRAMA_COCKPIT_KEY cockpit ⇄ agente · $PRAMA_ASSIST_KEY lo que te necesita · Ctrl+b n/p siguiente
 
 ${C_BOLD}SISTEMA${C_OFF}
   worktree list|create|remove|prune   profiles   mcp   agents [--json]

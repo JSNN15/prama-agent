@@ -747,7 +747,7 @@ _tui_help_entries() {
   _hk "$mk" 'back to this menu (◂ MENU)'
   _hk "$nk" 'agent list (☰)'
   _hk "$ck" 'team cockpit ⇄ agent (▦)'
-  _tui_key_label "$PRAMA_ASSIST_KEY"; _hk "$UI_S" 'the assistant waiting for you (★)'
+  _tui_key_label "$PRAMA_ASSIST_KEY"; _hk "$UI_S" 'what needs you, next on each press (▲ ★)'
   _hk 'Ctrl+b n/p' 'next / previous agent'
   _hk 'Ctrl+b z' 'zoom the focused pane'
   _hs 'MORE'
